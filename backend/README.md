@@ -34,3 +34,9 @@ uvicorn backend.app.main:app --reload
 3. `POST /articles/ingest`
 4. `GET /situations/{situation_id}/articles`
 5. `GET /situations/{situation_id}/dashboard`
+
+## Containers
+
+1. Backend container image is defined in `backend/Dockerfile`.
+2. Full Unraid stack is defined in `docker-compose.unraid.yml`.
+3. Unraid deployment instructions are in `DEPLOY_UNRAID.md`.

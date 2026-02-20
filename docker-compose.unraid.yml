@@ -1,0 +1,52 @@
+name: news-dashboard
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: news-dashboard-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-news_dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-news_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ${POSTGRES_DATA_PATH:-/mnt/user/appdata/news-dashboard/postgres}:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-news_user} -d ${POSTGRES_DB:-news_dashboard}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: news-dashboard-backend:latest
+    container_name: news-dashboard-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_NAME: News Situation API
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-news_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-news_dashboard}
+      CORS_ORIGINS_CSV: ${CORS_ORIGINS_CSV:-http://localhost:3000}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    image: news-dashboard-frontend:latest
+    container_name: news-dashboard-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
