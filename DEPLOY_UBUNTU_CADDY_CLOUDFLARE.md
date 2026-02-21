@@ -32,6 +32,8 @@ Update at minimum:
 2. `POSTGRES_PASSWORD`
 3. `CLOUDFLARE_TUNNEL_TOKEN`
 
+Do not commit `.env.ubuntu`. Keep credentials only in local env files.
+
 ## 3) Build images
 
 ```bash

@@ -1,0 +1,6 @@
+.env
+.env.*
+!.env.unraid.example
+!.env.ubuntu.example
+!backend/.env.example
+!frontend/.env.example
