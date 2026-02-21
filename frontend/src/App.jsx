@@ -67,6 +67,13 @@ export default function App() {
 
   const [dashboardSituationId, setDashboardSituationId] = useState("");
 
+  // Feed source state
+  const [feedSources, setFeedSources] = useState([]);
+  const [feedArticles, setFeedArticles] = useState([]);
+  const [feedName, setFeedName] = useState("");
+  const [feedUrl, setFeedUrl] = useState("");
+  const [feedCategory, setFeedCategory] = useState("general");
+
   const baseUrl = useMemo(() => apiBase.replace(/\/$/, ""), [apiBase]);
 
   // Validate stored token on mount
@@ -459,6 +466,140 @@ export default function App() {
           </button>
         </section>
       )}
+
+      {/* Admin only: Manage RSS Feeds */}
+      {isAdmin && (
+        <section className="card">
+          <h2>Manage RSS Feeds</h2>
+          <label>
+            Feed Name
+            <input
+              value={feedName}
+              onChange={(e) => setFeedName(e.target.value)}
+              placeholder="e.g. BBC News"
+            />
+          </label>
+          <label>
+            RSS URL
+            <input
+              value={feedUrl}
+              onChange={(e) => setFeedUrl(e.target.value)}
+              placeholder="https://feeds.bbci.co.uk/news/rss.xml"
+            />
+          </label>
+          <label>
+            Category
+            <input
+              value={feedCategory}
+              onChange={(e) => setFeedCategory(e.target.value)}
+              placeholder="general"
+            />
+          </label>
+          <div className="row">
+            <button
+              disabled={loading}
+              onClick={() =>
+                run(async () => {
+                  const created = await httpJson(`${baseUrl}/feed-sources`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                      name: feedName,
+                      rss_url: feedUrl,
+                      category: feedCategory || "general",
+                    }),
+                  });
+                  setFeedSources((prev) => [created, ...prev]);
+                  setFeedName("");
+                  setFeedUrl("");
+                  setFeedCategory("general");
+                  setMessage(`Added feed: ${created.name}`);
+                })
+              }
+            >
+              Add Feed
+            </button>
+            <button
+              disabled={loading}
+              onClick={() =>
+                run(async () => {
+                  const data = await httpJson(`${baseUrl}/feed-sources`);
+                  setFeedSources(data);
+                })
+              }
+            >
+              Load Feeds
+            </button>
+          </div>
+          {feedSources.length > 0 && (
+            <div className="result">
+              {feedSources.map((fs) => (
+                <div key={fs.id} className="feed-row">
+                  <div>
+                    <strong>{fs.name}</strong>
+                    <span className="badge">{fs.category}</span>
+                    <br />
+                    <span className="muted" style={{ fontSize: 12 }}>{fs.rss_url}</span>
+                    {fs.last_fetched_at && (
+                      <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>
+                        Last fetched: {new Date(fs.last_fetched_at).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    className="btn-outline btn-small"
+                    disabled={loading}
+                    onClick={() =>
+                      run(async () => {
+                        await httpJson(`${baseUrl}/feed-sources/${fs.id}`, {
+                          method: "DELETE",
+                        });
+                        setFeedSources((prev) => prev.filter((f) => f.id !== fs.id));
+                        setMessage(`Removed feed: ${fs.name}`);
+                      })
+                    }
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* All users: Feed Articles */}
+      <section className="card">
+        <h2>Latest Feed Articles</h2>
+        <button
+          disabled={loading}
+          onClick={() =>
+            run(async () => {
+              const data = await httpJson(`${baseUrl}/feed-articles?limit=20`);
+              setFeedArticles(data);
+            })
+          }
+        >
+          Load Articles
+        </button>
+        {feedArticles.length > 0 && (
+          <div className="result">
+            {feedArticles.map((a) => (
+              <div key={a.id} className="feed-article-row">
+                <a href={a.original_url} target="_blank" rel="noopener noreferrer">
+                  <strong>{a.title}</strong>
+                </a>
+                {a.author && <span className="muted"> by {a.author}</span>}
+                {a.published_date && (
+                  <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
+                    {new Date(a.published_date).toLocaleDateString()}
+                  </span>
+                )}
+                {a.snippet && <p className="muted" style={{ fontSize: 13, margin: "4px 0 0" }}>{a.snippet}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* All users: Dashboard */}
       <section className="card">

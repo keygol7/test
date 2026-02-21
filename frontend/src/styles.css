@@ -146,3 +146,39 @@ pre {
   background: #d4f5e2;
   color: #0b7a43;
 }
+
+.btn-small {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.feed-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #eef2f8;
+}
+
+.feed-row:last-child {
+  border-bottom: none;
+}
+
+.feed-article-row {
+  padding: 8px 0;
+  border-bottom: 1px solid #eef2f8;
+}
+
+.feed-article-row:last-child {
+  border-bottom: none;
+}
+
+.feed-article-row a {
+  color: #1e5eb8;
+  text-decoration: none;
+}
+
+.feed-article-row a:hover {
+  text-decoration: underline;
+}
