@@ -7,6 +7,13 @@ from sqlalchemy import desc, distinct, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from .auth import (
+    create_access_token,
+    get_current_user,
+    hash_password,
+    require_admin,
+    verify_password,
+)
 from .config import settings
 from .database import get_db
 from .models import AppUser, Article, DashboardSnapshot, Situation, SituationArticle, Source
@@ -14,12 +21,15 @@ from .schemas import (
     ArticleIngest,
     ArticleRead,
     DashboardRead,
+    LoginRequest,
     SituationArticleRead,
     SituationCreate,
     SituationRead,
     SituationUpdate,
+    TokenResponse,
     UserCreate,
     UserRead,
+    UserRegister,
 )
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -78,6 +88,15 @@ def require_situations(db: Session, situation_ids: list[UUID]) -> list[Situation
     return [by_id[sid] for sid in unique_ids]
 
 
+def require_situation_access(
+    db: Session, situation_id: UUID, current_user: AppUser
+) -> Situation:
+    situation = require_situation(db, situation_id)
+    if not current_user.is_admin and situation.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return situation
+
+
 def get_or_create_source(db: Session, payload: ArticleIngest) -> Source:
     base_url = payload.base_url or ""
     source = db.scalar(
@@ -100,6 +119,53 @@ def get_or_create_source(db: Session, payload: ArticleIngest) -> Source:
     return source
 
 
+# ── Auth Endpoints ──────────────────────────────────────────────
+
+
+@app.post("/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+def register(payload: UserRegister, db: Session = Depends(get_db)) -> dict:
+    existing = db.scalar(select(AppUser).where(AppUser.email == payload.email))
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already exists")
+
+    user_count = db.scalar(select(func.count()).select_from(AppUser))
+    make_admin = (user_count == 0) or (
+        settings.admin_email
+        and payload.email.lower() == settings.admin_email.lower()
+    )
+
+    user = AppUser(
+        email=payload.email,
+        display_name=payload.display_name,
+        password_hash=hash_password(payload.password),
+        is_admin=make_admin,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    token = create_access_token(user.id, user.is_admin)
+    return {"access_token": token, "token_type": "bearer", "user": user}
+
+
+@app.post("/auth/login", response_model=TokenResponse)
+def login(payload: LoginRequest, db: Session = Depends(get_db)) -> dict:
+    user = db.scalar(select(AppUser).where(AppUser.email == payload.email))
+    if not user or not user.password_hash or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    token = create_access_token(user.id, user.is_admin)
+    return {"access_token": token, "token_type": "bearer", "user": user}
+
+
+@app.get("/auth/me", response_model=UserRead)
+def get_me(current_user: AppUser = Depends(get_current_user)) -> AppUser:
+    return current_user
+
+
+# ── Health ──────────────────────────────────────────────────────
+
+
 @app.get("/health")
 def healthcheck(db: Session = Depends(get_db)) -> dict[str, str]:
     try:
@@ -109,13 +175,25 @@ def healthcheck(db: Session = Depends(get_db)) -> dict[str, str]:
     return {"status": "ok", "service": settings.app_name}
 
 
+# ── Users (Admin only) ─────────────────────────────────────────
+
+
 @app.post("/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> AppUser:
+def create_user(
+    payload: UserCreate,
+    db: Session = Depends(get_db),
+    _admin: AppUser = Depends(require_admin),
+) -> AppUser:
     existing = db.scalar(select(AppUser).where(AppUser.email == payload.email))
     if existing:
         raise HTTPException(status_code=409, detail="Email already exists")
 
-    user = AppUser(email=payload.email, display_name=payload.display_name)
+    user = AppUser(
+        email=payload.email,
+        display_name=payload.display_name,
+        password_hash=hash_password(payload.password) if payload.password else None,
+        is_admin=payload.is_admin,
+    )
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -127,12 +205,22 @@ def list_users(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    _admin: AppUser = Depends(require_admin),
 ) -> list[AppUser]:
     return db.scalars(select(AppUser).order_by(AppUser.created_at.desc()).limit(limit).offset(offset)).all()
 
 
+# ── Situations (Authenticated, with ownership) ─────────────────
+
+
 @app.post("/situations", response_model=SituationRead, status_code=status.HTTP_201_CREATED)
-def create_situation(payload: SituationCreate, db: Session = Depends(get_db)) -> Situation:
+def create_situation(
+    payload: SituationCreate,
+    db: Session = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
+) -> Situation:
+    if not current_user.is_admin and payload.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Cannot create situations for other users")
     require_user(db, payload.user_id)
 
     situation = Situation(
@@ -155,9 +243,12 @@ def list_situations(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
 ) -> list[Situation]:
     stmt = select(Situation)
-    if user_id is not None:
+    if not current_user.is_admin:
+        stmt = stmt.where(Situation.user_id == current_user.id)
+    elif user_id is not None:
         stmt = stmt.where(Situation.user_id == user_id)
     if is_active is not None:
         stmt = stmt.where(Situation.is_active == is_active)
@@ -166,8 +257,12 @@ def list_situations(
 
 
 @app.get("/situations/{situation_id}", response_model=SituationRead)
-def get_situation(situation_id: UUID, db: Session = Depends(get_db)) -> Situation:
-    return require_situation(db, situation_id)
+def get_situation(
+    situation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
+) -> Situation:
+    return require_situation_access(db, situation_id, current_user)
 
 
 @app.patch("/situations/{situation_id}", response_model=SituationRead)
@@ -175,8 +270,9 @@ def update_situation(
     situation_id: UUID,
     payload: SituationUpdate,
     db: Session = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
 ) -> Situation:
-    situation = require_situation(db, situation_id)
+    situation = require_situation_access(db, situation_id, current_user)
 
     changes = payload.model_dump(exclude_unset=True)
     for field, value in changes.items():
@@ -189,11 +285,18 @@ def update_situation(
 
 
 @app.delete("/situations/{situation_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_situation(situation_id: UUID, db: Session = Depends(get_db)) -> Response:
+def delete_situation(
+    situation_id: UUID,
+    db: Session = Depends(get_db),
+    _admin: AppUser = Depends(require_admin),
+) -> Response:
     situation = require_situation(db, situation_id)
     db.delete(situation)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Articles (Admin for ingest, Authenticated for read) ────────
 
 
 @app.post("/articles/ingest", response_model=ArticleRead)
@@ -201,6 +304,7 @@ def ingest_article(
     payload: ArticleIngest,
     response: Response,
     db: Session = Depends(get_db),
+    _admin: AppUser = Depends(require_admin),
 ) -> ArticleRead:
     require_situations(db, payload.situation_ids)
 
@@ -237,7 +341,6 @@ def ingest_article(
             db.flush()
         except IntegrityError:
             db.rollback()
-            # Re-fetch source since rollback clears the session
             source = get_or_create_source(db, payload)
             article = db.scalar(select(Article).where(Article.url == str(payload.url)))
             if article is None:
@@ -291,8 +394,9 @@ def list_articles_for_situation(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
 ) -> list[SituationArticleRead]:
-    require_situation(db, situation_id)
+    require_situation_access(db, situation_id, current_user)
 
     stmt = (
         select(SituationArticle, Article)
@@ -314,13 +418,17 @@ def list_articles_for_situation(
     ]
 
 
+# ── Dashboard ──────────────────────────────────────────────────
+
+
 @app.get("/situations/{situation_id}/dashboard", response_model=DashboardRead)
 def get_dashboard(
     situation_id: UUID,
     persist_snapshot: bool = False,
     db: Session = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
 ) -> DashboardRead:
-    require_situation(db, situation_id)
+    require_situation_access(db, situation_id, current_user)
 
     article_count = db.scalar(
         select(func.count()).select_from(SituationArticle).where(SituationArticle.situation_id == situation_id)

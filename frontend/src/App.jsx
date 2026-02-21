@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { authHeaders, clearAuth, getToken, getUser, saveAuth } from "./auth";
 
 const defaultApiBase = import.meta.env.VITE_API_BASE_URL || "/api";
 
@@ -7,8 +8,9 @@ async function httpJson(url, options = {}) {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(options.headers || {})
-    }
+      ...authHeaders(),
+      ...(options.headers || {}),
+    },
   });
 
   let payload = null;
@@ -16,6 +18,12 @@ async function httpJson(url, options = {}) {
     payload = await response.json();
   } catch {
     payload = null;
+  }
+
+  if (response.status === 401) {
+    clearAuth();
+    window.location.reload();
+    return;
   }
 
   if (!response.ok) {
@@ -27,6 +35,8 @@ async function httpJson(url, options = {}) {
 
 export default function App() {
   const [apiBase, setApiBase] = useState(defaultApiBase);
+  const [user, setUser] = useState(getUser());
+  const [authView, setAuthView] = useState("login");
   const [health, setHealth] = useState("");
   const [users, setUsers] = useState([]);
   const [situations, setSituations] = useState([]);
@@ -34,6 +44,14 @@ export default function App() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Auth form state
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [regEmail, setRegEmail] = useState("");
+  const [regDisplayName, setRegDisplayName] = useState("");
+  const [regPassword, setRegPassword] = useState("");
+
+  // Existing form state
   const [userEmail, setUserEmail] = useState("");
   const [userDisplayName, setUserDisplayName] = useState("");
 
@@ -50,6 +68,28 @@ export default function App() {
   const [dashboardSituationId, setDashboardSituationId] = useState("");
 
   const baseUrl = useMemo(() => apiBase.replace(/\/$/, ""), [apiBase]);
+
+  // Validate stored token on mount
+  useEffect(() => {
+    const token = getToken();
+    if (token) {
+      fetch(`${baseUrl}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error("Token invalid");
+          return res.json();
+        })
+        .then((userData) => {
+          saveAuth(token, userData);
+          setUser(userData);
+        })
+        .catch(() => {
+          clearAuth();
+          setUser(null);
+        });
+    }
+  }, [baseUrl]);
 
   async function run(action) {
     setLoading(true);
@@ -77,12 +117,157 @@ export default function App() {
     return value.join(" | ");
   }
 
+  async function handleLogin() {
+    await run(async () => {
+      const data = await httpJson(`${baseUrl}/auth/login`, {
+        method: "POST",
+        body: JSON.stringify({ email: loginEmail, password: loginPassword }),
+      });
+      if (data) {
+        saveAuth(data.access_token, data.user);
+        setUser(data.user);
+        setLoginEmail("");
+        setLoginPassword("");
+      }
+    });
+  }
+
+  async function handleRegister() {
+    await run(async () => {
+      const data = await httpJson(`${baseUrl}/auth/register`, {
+        method: "POST",
+        body: JSON.stringify({
+          email: regEmail,
+          display_name: regDisplayName,
+          password: regPassword,
+        }),
+      });
+      if (data) {
+        saveAuth(data.access_token, data.user);
+        setUser(data.user);
+        setRegEmail("");
+        setRegDisplayName("");
+        setRegPassword("");
+      }
+    });
+  }
+
+  function handleLogout() {
+    clearAuth();
+    setUser(null);
+    setUsers([]);
+    setSituations([]);
+    setDashboard(null);
+    setHealth("");
+    setMessage("");
+  }
+
+  // ── Not logged in: show login / register ──
+
+  if (!user) {
+    return (
+      <main className="layout">
+        <section className="card auth-card">
+          {authView === "login" ? (
+            <>
+              <h1>Sign In</h1>
+              <p className="muted">Log in to your News Situation Dashboard account.</p>
+              <label>
+                Email
+                <input
+                  type="email"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  placeholder="you@example.com"
+                />
+              </label>
+              <label>
+                Password
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="Your password"
+                />
+              </label>
+              <button disabled={loading} onClick={handleLogin}>
+                {loading ? "Signing in..." : "Sign In"}
+              </button>
+              <p className="muted">
+                No account?{" "}
+                <a className="auth-toggle" onClick={() => { setAuthView("register"); setMessage(""); }}>
+                  Register
+                </a>
+              </p>
+            </>
+          ) : (
+            <>
+              <h1>Register</h1>
+              <p className="muted">Create a new account. The first user automatically becomes admin.</p>
+              <label>
+                Email
+                <input
+                  type="email"
+                  value={regEmail}
+                  onChange={(e) => setRegEmail(e.target.value)}
+                  placeholder="you@example.com"
+                />
+              </label>
+              <label>
+                Display Name
+                <input
+                  value={regDisplayName}
+                  onChange={(e) => setRegDisplayName(e.target.value)}
+                  placeholder="Your Name"
+                />
+              </label>
+              <label>
+                Password
+                <input
+                  type="password"
+                  value={regPassword}
+                  onChange={(e) => setRegPassword(e.target.value)}
+                  placeholder="Min 8 characters"
+                />
+              </label>
+              <button disabled={loading} onClick={handleRegister}>
+                {loading ? "Creating account..." : "Register"}
+              </button>
+              <p className="muted">
+                Already have an account?{" "}
+                <a className="auth-toggle" onClick={() => { setAuthView("login"); setMessage(""); }}>
+                  Sign In
+                </a>
+              </p>
+            </>
+          )}
+          {message ? <p className="err">{message}</p> : null}
+
+          <label className="muted" style={{ marginTop: 16, fontSize: 12 }}>
+            API Base URL
+            <input value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
+          </label>
+        </section>
+      </main>
+    );
+  }
+
+  // ── Logged in: show dashboard ──
+
+  const isAdmin = user.is_admin;
+
   return (
     <main className="layout">
-      <section className="card">
+      <section className="card header-bar">
         <h1>News Situation Dashboard</h1>
-        <p className="muted">Connect to your FastAPI backend and seed test data.</p>
-        <label>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <p className="muted">
+            Logged in as <strong>{user.display_name}</strong>{" "}
+            <span className={isAdmin ? "badge admin" : "badge"}>{isAdmin ? "Admin" : "User"}</span>
+          </p>
+          <button className="btn-outline" onClick={handleLogout}>Logout</button>
+        </div>
+        <label className="muted" style={{ fontSize: 12 }}>
           API Base URL
           <input value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
         </label>
@@ -98,17 +283,19 @@ export default function App() {
           >
             Check Health
           </button>
-          <button
-            disabled={loading}
-            onClick={() =>
-              run(async () => {
-                const data = await httpJson(`${baseUrl}/users`);
-                setUsers(data);
-              })
-            }
-          >
-            Load Users
-          </button>
+          {isAdmin && (
+            <button
+              disabled={loading}
+              onClick={() =>
+                run(async () => {
+                  const data = await httpJson(`${baseUrl}/users`);
+                  setUsers(data);
+                })
+              }
+            >
+              Load Users
+            </button>
+          )}
           <button
             disabled={loading}
             onClick={() =>
@@ -125,52 +312,58 @@ export default function App() {
         {message ? <p className="err">{message}</p> : null}
       </section>
 
-      <section className="card">
-        <h2>Create User</h2>
-        <label>
-          Email
-          <input
-            value={userEmail}
-            onChange={(e) => setUserEmail(e.target.value)}
-            placeholder="you@example.com"
-          />
-        </label>
-        <label>
-          Display Name
-          <input
-            value={userDisplayName}
-            onChange={(e) => setUserDisplayName(e.target.value)}
-            placeholder="Your Name"
-          />
-        </label>
-        <button
-          disabled={loading}
-          onClick={() =>
-            run(async () => {
-              const created = await httpJson(`${baseUrl}/users`, {
-                method: "POST",
-                body: JSON.stringify({ email: userEmail, display_name: userDisplayName })
-              });
-              setUsers((prev) => [created, ...prev]);
-              setSituationUserId(created.id);
-              setMessage(`Created user ${created.id}`);
-            })
-          }
-        >
-          Create User
-        </button>
-      </section>
+      {/* Admin only: Create User */}
+      {isAdmin && (
+        <section className="card">
+          <h2>Create User</h2>
+          <label>
+            Email
+            <input
+              value={userEmail}
+              onChange={(e) => setUserEmail(e.target.value)}
+              placeholder="you@example.com"
+            />
+          </label>
+          <label>
+            Display Name
+            <input
+              value={userDisplayName}
+              onChange={(e) => setUserDisplayName(e.target.value)}
+              placeholder="Your Name"
+            />
+          </label>
+          <button
+            disabled={loading}
+            onClick={() =>
+              run(async () => {
+                const created = await httpJson(`${baseUrl}/users`, {
+                  method: "POST",
+                  body: JSON.stringify({ email: userEmail, display_name: userDisplayName }),
+                });
+                setUsers((prev) => [created, ...prev]);
+                setSituationUserId(created.id);
+                setMessage(`Created user ${created.id}`);
+              })
+            }
+          >
+            Create User
+          </button>
+        </section>
+      )}
 
+      {/* All users: Create Situation */}
       <section className="card">
         <h2>Create Situation</h2>
-        <label>
-          User ID
-          <input
-            value={situationUserId}
-            onChange={(e) => setSituationUserId(e.target.value)}
-            placeholder="UUID"
-          />
-        </label>
+        {isAdmin ? (
+          <label>
+            User ID
+            <input
+              value={situationUserId}
+              onChange={(e) => setSituationUserId(e.target.value)}
+              placeholder="UUID"
+            />
+          </label>
+        ) : null}
         <label>
           Title
           <input value={situationTitle} onChange={(e) => setSituationTitle(e.target.value)} />
@@ -197,12 +390,12 @@ export default function App() {
               const created = await httpJson(`${baseUrl}/situations`, {
                 method: "POST",
                 body: JSON.stringify({
-                  user_id: situationUserId,
+                  user_id: isAdmin && situationUserId ? situationUserId : user.id,
                   title: situationTitle,
                   query: situationQuery,
                   description: situationDescription || null,
-                  is_active: true
-                })
+                  is_active: true,
+                }),
               });
               setSituations((prev) => [created, ...prev]);
               setDashboardSituationId(created.id);
@@ -215,55 +408,59 @@ export default function App() {
         </button>
       </section>
 
-      <section className="card">
-        <h2>Ingest Article</h2>
-        <label>
-          URL
-          <input
-            value={articleUrl}
-            onChange={(e) => setArticleUrl(e.target.value)}
-            placeholder="https://example.com/news/story"
-          />
-        </label>
-        <label>
-          Title
-          <input value={articleTitle} onChange={(e) => setArticleTitle(e.target.value)} />
-        </label>
-        <label>
-          Source Name
-          <input value={articleSource} onChange={(e) => setArticleSource(e.target.value)} />
-        </label>
-        <label>
-          Situation IDs (comma-separated)
-          <input
-            value={articleSituationIds}
-            onChange={(e) => setArticleSituationIds(e.target.value)}
-            placeholder="uuid1,uuid2"
-          />
-        </label>
-        <button
-          disabled={loading}
-          onClick={() =>
-            run(async () => {
-              await httpJson(`${baseUrl}/articles/ingest`, {
-                method: "POST",
-                body: JSON.stringify({
-                  url: articleUrl,
-                  title: articleTitle,
-                  source_name: articleSource,
-                  source_type: "news_site",
-                  situation_ids: parseUuidCsv(articleSituationIds),
-                  metadata: {}
-                })
-              });
-              setMessage("Article ingested");
-            })
-          }
-        >
-          Ingest Article
-        </button>
-      </section>
+      {/* Admin only: Ingest Article */}
+      {isAdmin && (
+        <section className="card">
+          <h2>Ingest Article</h2>
+          <label>
+            URL
+            <input
+              value={articleUrl}
+              onChange={(e) => setArticleUrl(e.target.value)}
+              placeholder="https://example.com/news/story"
+            />
+          </label>
+          <label>
+            Title
+            <input value={articleTitle} onChange={(e) => setArticleTitle(e.target.value)} />
+          </label>
+          <label>
+            Source Name
+            <input value={articleSource} onChange={(e) => setArticleSource(e.target.value)} />
+          </label>
+          <label>
+            Situation IDs (comma-separated)
+            <input
+              value={articleSituationIds}
+              onChange={(e) => setArticleSituationIds(e.target.value)}
+              placeholder="uuid1,uuid2"
+            />
+          </label>
+          <button
+            disabled={loading}
+            onClick={() =>
+              run(async () => {
+                await httpJson(`${baseUrl}/articles/ingest`, {
+                  method: "POST",
+                  body: JSON.stringify({
+                    url: articleUrl,
+                    title: articleTitle,
+                    source_name: articleSource,
+                    source_type: "news_site",
+                    situation_ids: parseUuidCsv(articleSituationIds),
+                    metadata: {},
+                  }),
+                });
+                setMessage("Article ingested");
+              })
+            }
+          >
+            Ingest Article
+          </button>
+        </section>
+      )}
 
+      {/* All users: Dashboard */}
       <section className="card">
         <h2>Dashboard</h2>
         <label>
@@ -298,10 +495,15 @@ export default function App() {
         ) : null}
       </section>
 
+      {/* Current Data */}
       <section className="card">
         <h2>Current Data</h2>
-        <p className="muted">Users</p>
-        <pre>{JSON.stringify(users, null, 2)}</pre>
+        {isAdmin && (
+          <>
+            <p className="muted">Users</p>
+            <pre>{JSON.stringify(users, null, 2)}</pre>
+          </>
+        )}
         <p className="muted">Situations</p>
         <pre>{JSON.stringify(situations, null, 2)}</pre>
       </section>

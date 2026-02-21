@@ -13,6 +13,10 @@ class Settings(BaseSettings):
         "postgresql+psycopg://postgres:postgres@localhost:5432/news_dashboard"
     )
     cors_origins_csv: str = ""
+    jwt_secret_key: str = "CHANGE-ME-IN-PRODUCTION"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 60
+    admin_email: str = ""
 
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),

@@ -7,19 +7,39 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl
 SourceType = Literal["news_site", "social", "rss", "api", "other"]
 
 
+class UserRegister(BaseModel):
+    email: EmailStr
+    display_name: str = Field(min_length=1, max_length=200)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
 class UserCreate(BaseModel):
     email: EmailStr
     display_name: str = Field(min_length=1, max_length=200)
+    password: str | None = Field(default=None, min_length=8, max_length=128)
+    is_admin: bool = False
 
 
 class UserRead(BaseModel):
     id: UUID
     email: EmailStr
     display_name: str
+    is_admin: bool
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserRead
 
 
 class SituationCreate(BaseModel):
