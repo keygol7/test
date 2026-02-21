@@ -45,6 +45,19 @@ services:
         parallelism: 1
         failure_action: rollback
 
+  rss-worker:
+    image: ${BACKEND_IMAGE:-news-dashboard-backend:latest}
+    command: ["python", "-m", "backend.app.worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-news_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-news_dashboard}
+    networks:
+      - app_net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+
   frontend:
     image: ${FRONTEND_IMAGE:-news-dashboard-frontend:latest}
     networks:

@@ -112,6 +112,38 @@ class SituationArticleRead(BaseModel):
     tagged_at: datetime
 
 
+class FeedSourceCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=300)
+    rss_url: str = Field(min_length=1, max_length=2000)
+    category: str = Field(default="general", min_length=1, max_length=100)
+
+
+class FeedSourceRead(BaseModel):
+    id: UUID
+    name: str
+    rss_url: str
+    category: str
+    is_active: bool
+    last_fetched_at: datetime | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FeedArticleRead(BaseModel):
+    id: UUID
+    feed_source_id: UUID
+    title: str
+    original_url: str
+    snippet: str | None
+    author: str | None
+    published_date: datetime | None
+    thumbnail_url: str | None
+    ingested_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class DashboardRead(BaseModel):
     situation_id: UUID
     generated_at: datetime

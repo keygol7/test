@@ -68,6 +68,31 @@ CREATE TABLE IF NOT EXISTS dashboard_snapshot (
     trend_notes TEXT
 );
 
+CREATE TABLE IF NOT EXISTS feed_source (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    rss_url TEXT NOT NULL UNIQUE,
+    category TEXT NOT NULL DEFAULT 'general',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    last_fetched_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS feed_article (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    feed_source_id UUID NOT NULL REFERENCES feed_source(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    original_url TEXT NOT NULL UNIQUE,
+    snippet TEXT,
+    author TEXT,
+    published_date TIMESTAMPTZ,
+    thumbnail_url TEXT,
+    ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_feed_article_source_id ON feed_article(feed_source_id);
+CREATE INDEX IF NOT EXISTS idx_feed_article_published ON feed_article(published_date DESC);
+
 CREATE INDEX IF NOT EXISTS idx_situation_user_id ON situation(user_id);
 CREATE INDEX IF NOT EXISTS idx_article_source_id ON article(source_id);
 CREATE INDEX IF NOT EXISTS idx_article_published_at ON article(published_at DESC);

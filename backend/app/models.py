@@ -147,6 +147,48 @@ class SituationArticle(Base):
     article: Mapped["Article"] = relationship(back_populates="situation_articles")
 
 
+class FeedSource(Base):
+    __tablename__ = "feed_source"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    rss_url: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    category: Mapped[str] = mapped_column(Text, nullable=False, default="general")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    feed_articles: Mapped[list["FeedArticle"]] = relationship(
+        back_populates="feed_source", cascade="all, delete-orphan"
+    )
+
+
+class FeedArticle(Base):
+    __tablename__ = "feed_article"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    feed_source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("feed_source.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    original_url: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    snippet: Mapped[str | None] = mapped_column(Text)
+    author: Mapped[str | None] = mapped_column(Text)
+    published_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    thumbnail_url: Mapped[str | None] = mapped_column(Text)
+    ingested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    feed_source: Mapped["FeedSource"] = relationship(back_populates="feed_articles")
+
+
 class DashboardSnapshot(Base):
     __tablename__ = "dashboard_snapshot"
 

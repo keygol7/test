@@ -16,11 +16,14 @@ from .auth import (
 )
 from .config import settings
 from .database import get_db
-from .models import AppUser, Article, DashboardSnapshot, Situation, SituationArticle, Source
+from .models import AppUser, Article, DashboardSnapshot, FeedArticle, FeedSource, Situation, SituationArticle, Source
 from .schemas import (
     ArticleIngest,
     ArticleRead,
     DashboardRead,
+    FeedArticleRead,
+    FeedSourceCreate,
+    FeedSourceRead,
     LoginRequest,
     SituationArticleRead,
     SituationCreate,
@@ -470,3 +473,71 @@ def get_dashboard(
         top_headlines=headlines,
         trend_notes=None,
     )
+
+
+# ── Feed Sources (Admin only) ─────────────────────────────────
+
+
+@app.post("/feed-sources", response_model=FeedSourceRead, status_code=status.HTTP_201_CREATED)
+def create_feed_source(
+    payload: FeedSourceCreate,
+    db: Session = Depends(get_db),
+    _admin: AppUser = Depends(require_admin),
+) -> FeedSource:
+    existing = db.scalar(select(FeedSource).where(FeedSource.rss_url == payload.rss_url))
+    if existing:
+        raise HTTPException(status_code=409, detail="Feed URL already exists")
+
+    source = FeedSource(name=payload.name, rss_url=payload.rss_url, category=payload.category)
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+    return source
+
+
+@app.get("/feed-sources", response_model=list[FeedSourceRead])
+def list_feed_sources(
+    category: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    _user: AppUser = Depends(get_current_user),
+) -> list[FeedSource]:
+    stmt = select(FeedSource)
+    if category is not None:
+        stmt = stmt.where(FeedSource.category == category)
+    stmt = stmt.order_by(FeedSource.created_at.desc()).limit(limit).offset(offset)
+    return db.scalars(stmt).all()
+
+
+@app.delete("/feed-sources/{feed_source_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_feed_source(
+    feed_source_id: UUID,
+    db: Session = Depends(get_db),
+    _admin: AppUser = Depends(require_admin),
+) -> Response:
+    source = db.scalar(select(FeedSource).where(FeedSource.id == feed_source_id))
+    if not source:
+        raise HTTPException(status_code=404, detail="Feed source not found")
+    db.delete(source)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Feed Articles (Authenticated, read-only) ──────────────────
+
+
+@app.get("/feed-articles", response_model=list[FeedArticleRead])
+def list_feed_articles(
+    feed_source_id: UUID | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    _user: AppUser = Depends(get_current_user),
+) -> list[FeedArticle]:
+    stmt = select(FeedArticle)
+    if feed_source_id is not None:
+        stmt = stmt.where(FeedArticle.feed_source_id == feed_source_id)
+    stmt = stmt.order_by(FeedArticle.published_date.desc().nullslast(), FeedArticle.ingested_at.desc())
+    stmt = stmt.limit(limit).offset(offset)
+    return db.scalars(stmt).all()
