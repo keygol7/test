@@ -66,7 +66,7 @@ docker stack services $(grep '^STACK_NAME=' .env.ubuntu | cut -d '=' -f2)
 2. Backend health through Caddy path:
 
 ```bash
-curl -s http://127.0.0.1:${CADDY_HTTP_PORT:-8080}/api/health
+curl -s http://127.0.0.1:8080/api/health
 ```
 
 Expected:
@@ -74,6 +74,11 @@ Expected:
 ```json
 {"status":"ok","service":"News Situation API"}
 ```
+
+`docker-stack.ubuntu.yml` currently publishes Caddy on host port `8080`.
+If you need a different host port, change `services.caddy.ports[0].published` to an integer.
+Initial backend/frontend replicas are set as integers in the stack file (`2` and `2`).
+Adjust `services.backend.deploy.replicas` and `services.frontend.deploy.replicas` directly if needed.
 
 ## Auto-scaling notes
 

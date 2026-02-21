@@ -36,7 +36,7 @@ services:
     networks:
       - app_net
     deploy:
-      replicas: ${BACKEND_MIN_REPLICAS:-2}
+      replicas: 2
       endpoint_mode: dnsrr
       restart_policy:
         condition: on-failure
@@ -50,7 +50,7 @@ services:
     networks:
       - app_net
     deploy:
-      replicas: ${FRONTEND_REPLICAS:-2}
+      replicas: 2
       endpoint_mode: dnsrr
       restart_policy:
         condition: on-failure
@@ -69,7 +69,7 @@ services:
       - caddy_config:/config
     ports:
       - target: 80
-        published: ${CADDY_HTTP_PORT:-8080}
+        published: 8080
         protocol: tcp
         mode: host
     networks:
