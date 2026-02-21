@@ -75,8 +75,8 @@ Expected:
 {"status":"ok","service":"News Situation API"}
 ```
 
-`docker-stack.ubuntu.yml` currently publishes Caddy on host port `8080`.
-If you need a different host port, change `services.caddy.ports[0].published` to an integer.
+`docker-stack.ubuntu.yml` currently publishes Caddy as `8080:80`.
+If you need a different host port, change `services.caddy.ports[0]` to another `HOST:CONTAINER` value (for example `9090:80`).
 Initial backend/frontend replicas are set as integers in the stack file (`2` and `2`).
 Adjust `services.backend.deploy.replicas` and `services.frontend.deploy.replicas` directly if needed.
 

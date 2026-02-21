@@ -68,10 +68,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     ports:
-      - target: 80
-        published: 8080
-        protocol: tcp
-        mode: host
+      - "8080:80"
     networks:
       - app_net
       - edge_net
