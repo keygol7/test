@@ -40,12 +40,16 @@ docker compose --env-file .env.ubuntu -f docker-compose.build.yml build
 
 ## 4) Deploy stack to Swarm
 
-Render the stack with env values and deploy:
+Load env vars into your shell, then deploy directly from `docker-stack.ubuntu.yml`:
 
 ```bash
-docker compose --env-file .env.ubuntu -f docker-stack.ubuntu.yml config > /tmp/newsdash-stack.yml
-docker stack deploy -c /tmp/newsdash-stack.yml $(grep '^STACK_NAME=' .env.ubuntu | cut -d '=' -f2)
+set -a
+source .env.ubuntu
+set +a
+docker stack deploy -c docker-stack.ubuntu.yml "$STACK_NAME"
 ```
+
+Avoid `docker compose ... config` as an intermediate step for stack deploy, because it can coerce some numeric fields (like published ports) into strings.
 
 ## 5) Cloudflare Tunnel routing
 
@@ -60,7 +64,7 @@ In Cloudflare Zero Trust, for the tunnel matching your token:
 1. Stack services:
 
 ```bash
-docker stack services $(grep '^STACK_NAME=' .env.ubuntu | cut -d '=' -f2)
+docker stack services "$STACK_NAME"
 ```
 
 2. Backend health through Caddy path:
