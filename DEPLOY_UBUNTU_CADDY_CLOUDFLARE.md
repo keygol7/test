@@ -33,6 +33,7 @@ Update at minimum:
 3. `CLOUDFLARE_TUNNEL_TOKEN`
 
 Do not commit `.env.ubuntu`. Keep credentials only in local env files.
+If credentials were exposed in logs/chat, rotate them immediately (Cloudflare tunnel token and DB password).
 
 ## 3) Build images
 

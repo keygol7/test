@@ -6,8 +6,7 @@
 {$PUBLIC_HOST:localhost} {
     encode zstd gzip
 
-    @api path /api/*
-    handle_path @api {
+    handle_path /api/* {
         reverse_proxy backend:8000 {
             lb_policy least_conn
             health_uri /health
