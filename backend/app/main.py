@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import desc, distinct, func, select
+from sqlalchemy import desc, distinct, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -88,12 +88,24 @@ def get_or_create_source(db: Session, payload: ArticleIngest) -> Source:
 
     source = Source(name=payload.source_name, base_url=base_url, source_type=payload.source_type)
     db.add(source)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        source = db.scalar(
+            select(Source).where(Source.name == payload.source_name, Source.base_url == base_url)
+        )
+        if source is None:
+            raise HTTPException(status_code=500, detail="Could not create or find source")
     return source
 
 
 @app.get("/health")
-def healthcheck() -> dict[str, str]:
+def healthcheck(db: Session = Depends(get_db)) -> dict[str, str]:
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        raise HTTPException(status_code=503, detail="Database unavailable")
     return {"status": "ok", "service": settings.app_name}
 
 
@@ -221,8 +233,26 @@ def ingest_article(
             extra_metadata=payload.metadata,
         )
         db.add(article)
-        db.flush()
-        created = True
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            # Re-fetch source since rollback clears the session
+            source = get_or_create_source(db, payload)
+            article = db.scalar(select(Article).where(Article.url == str(payload.url)))
+            if article is None:
+                raise HTTPException(status_code=500, detail="Could not create or find article")
+            article.source_id = source.id
+            article.external_id = payload.external_id
+            article.title = payload.title
+            article.author = payload.author
+            article.published_at = payload.published_at
+            article.summary = payload.summary
+            article.content = payload.content
+            article.sentiment_score = payload.sentiment_score
+            article.extra_metadata = payload.metadata
+        else:
+            created = True
 
     for situation_id in payload.situation_ids:
         link = db.scalar(
