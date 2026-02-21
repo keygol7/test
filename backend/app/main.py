@@ -129,9 +129,9 @@ def register(payload: UserRegister, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=409, detail="Email already exists")
 
     user_count = db.scalar(select(func.count()).select_from(AppUser))
-    make_admin = (user_count == 0) or (
-        settings.admin_email
-        and payload.email.lower() == settings.admin_email.lower()
+    make_admin = bool(
+        (user_count == 0)
+        or (settings.admin_email and payload.email.lower() == settings.admin_email.lower())
     )
 
     user = AppUser(
