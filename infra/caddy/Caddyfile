@@ -3,7 +3,7 @@
     admin off
 }
 
-{$PUBLIC_HOST:localhost} {
+:80 {
     encode zstd gzip
 
     handle_path /api/* {

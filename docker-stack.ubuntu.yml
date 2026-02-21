@@ -59,14 +59,15 @@ services:
 
   caddy:
     image: caddy:2.8.4-alpine
-    environment:
-      PUBLIC_HOST: ${PUBLIC_HOST}
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     ports:
-      - "8080:80"
+      - target: 80
+        published: 8080
+        protocol: tcp
+        mode: host
     networks:
       - app_net
       - edge_net
