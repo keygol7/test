@@ -40,3 +40,5 @@ uvicorn backend.app.main:app --reload
 1. Backend container image is defined in `backend/Dockerfile`.
 2. Full Unraid stack is defined in `docker-compose.unraid.yml`.
 3. Unraid deployment instructions are in `DEPLOY_UNRAID.md`.
+4. Ubuntu VM + Caddy + Cloudflare Tunnel stack is defined in `docker-stack.ubuntu.yml`.
+5. Ubuntu deployment instructions are in `DEPLOY_UBUNTU_CADDY_CLOUDFLARE.md`.

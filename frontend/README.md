@@ -16,6 +16,7 @@ npm run dev
 
 ## API base URL
 
-Set `VITE_API_BASE_URL` to point at your backend, for example:
+Set `VITE_API_BASE_URL` to point at your backend.
 
-`VITE_API_BASE_URL=http://localhost:8000`
+1. Behind Caddy routing (`/api/*` -> backend): `VITE_API_BASE_URL=/api`
+2. Direct backend access: `VITE_API_BASE_URL=http://localhost:8000`

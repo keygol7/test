@@ -1,0 +1,128 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-news_dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-news_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ${POSTGRES_DATA_PATH:-/opt/news-dashboard/postgres}:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-news_user} -d ${POSTGRES_DB:-news_dashboard}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - app_net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  backend:
+    image: ${BACKEND_IMAGE:-news-dashboard-backend:latest}
+    environment:
+      APP_NAME: News Situation API
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-news_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-news_dashboard}
+      CORS_ORIGINS_CSV: ${CORS_ORIGINS_CSV:-}
+    networks:
+      - app_net
+    deploy:
+      replicas: ${BACKEND_MIN_REPLICAS:-2}
+      endpoint_mode: dnsrr
+      restart_policy:
+        condition: on-failure
+      update_config:
+        order: start-first
+        parallelism: 1
+        failure_action: rollback
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-news-dashboard-frontend:latest}
+    networks:
+      - app_net
+    deploy:
+      replicas: ${FRONTEND_REPLICAS:-2}
+      endpoint_mode: dnsrr
+      restart_policy:
+        condition: on-failure
+      update_config:
+        order: start-first
+        parallelism: 1
+        failure_action: rollback
+
+  caddy:
+    image: caddy:2.8.4-alpine
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST}
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - target: 80
+        published: ${CADDY_HTTP_PORT:-8080}
+        protocol: tcp
+        mode: host
+    networks:
+      - app_net
+      - edge_net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - edge_net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  autoscaler:
+    image: ${AUTOSCALER_IMAGE:-news-dashboard-autoscaler:latest}
+    environment:
+      STACK_NAME: ${STACK_NAME:-newsdash}
+      TARGET_SERVICE: backend
+      MIN_REPLICAS: ${BACKEND_MIN_REPLICAS:-2}
+      MAX_REPLICAS: ${BACKEND_MAX_REPLICAS:-8}
+      CHECK_INTERVAL_SEC: ${AUTOSCALE_INTERVAL_SEC:-30}
+      COOLDOWN_SEC: ${AUTOSCALE_COOLDOWN_SEC:-120}
+      SCALE_STEP: ${AUTOSCALE_STEP:-1}
+      SCALE_UP_CPU: ${AUTOSCALE_UP_CPU:-75}
+      SCALE_DOWN_CPU: ${AUTOSCALE_DOWN_CPU:-25}
+      WINDOW_SIZE: ${AUTOSCALE_WINDOW_SIZE:-3}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - app_net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  app_net:
+    driver: overlay
+    attachable: true
+  edge_net:
+    driver: overlay
+    attachable: true

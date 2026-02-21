@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-const defaultApiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const defaultApiBase = import.meta.env.VITE_API_BASE_URL || "/api";
 
 async function httpJson(url, options = {}) {
   const response = await fetch(url, {

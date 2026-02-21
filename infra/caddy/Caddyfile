@@ -1,0 +1,23 @@
+{
+    auto_https off
+    admin off
+}
+
+{$PUBLIC_HOST:localhost} {
+    encode zstd gzip
+
+    @api path /api/*
+    handle_path @api {
+        reverse_proxy backend:8000 {
+            lb_policy least_conn
+            health_uri /health
+            health_interval 10s
+        }
+    }
+
+    handle {
+        reverse_proxy frontend:80 {
+            lb_policy round_robin
+        }
+    }
+}

@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+psycopg://postgres:postgres@localhost:5432/news_dashboard"
     )
-    cors_origins_csv: str = "http://localhost:3000"
+    cors_origins_csv: str = ""
 
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),

@@ -1,0 +1,20 @@
+services:
+  backend:
+    image: ${BACKEND_IMAGE:-news-dashboard-backend:latest}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-news-dashboard-frontend:latest}
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+
+  autoscaler:
+    image: ${AUTOSCALER_IMAGE:-news-dashboard-autoscaler:latest}
+    build:
+      context: .
+      dockerfile: ops/autoscaler/Dockerfile
