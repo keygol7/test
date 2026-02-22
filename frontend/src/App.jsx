@@ -208,11 +208,9 @@ export default function App() {
   }
 
   function handleSelectSuggestion(suggestion) {
-    const title = suggestion.title;
-    const query = suggestion.suggested_query;
-    const description = `Tracking: ${title}. Source: ${suggestion.source}.${
-      suggestion.published ? " Published: " + suggestion.published + "." : ""
-    }`;
+    const title = suggestion.topic;
+    const query = suggestion.query;
+    const description = suggestion.description;
 
     setSituationTitle(title);
     setSituationQuery(query);
@@ -435,7 +433,7 @@ export default function App() {
       {/* All users: Create Situation */}
       <section className="card situation-creator">
         <h2>Create Situation</h2>
-        <p className="muted">Search current headlines to quickly create a situation, or fill in the form manually.</p>
+        <p className="muted">Search for news situations to track, or fill in the form manually below.</p>
 
         {/* Live headline search */}
         <div className="search-bar">
@@ -447,7 +445,7 @@ export default function App() {
             className="search-input"
             value={suggestionSearch}
             onChange={(e) => setSuggestionSearch(e.target.value)}
-            placeholder="Search headlines... e.g. AI regulation, climate summit, elections"
+            placeholder="Search news situations... e.g. AI regulation, climate summit, elections"
             autoComplete="off"
           />
           {suggestionSearch && (
@@ -464,14 +462,14 @@ export default function App() {
         {suggestionsLoading && (
           <div className="search-status">
             <span className="spinner" />
-            Searching live headlines...
+            Finding news situations...
           </div>
         )}
 
         {showSuggestions && suggestions.length > 0 && (
           <div className="headline-results">
             <p className="headline-results-label">
-              {suggestions.length} headline{suggestions.length !== 1 ? "s" : ""} found — click to create a situation
+              {suggestions.length} situation{suggestions.length !== 1 ? "s" : ""} found — click to start tracking
             </p>
             <div className="headline-grid">
               {suggestions.map((s, i) => (
@@ -480,12 +478,24 @@ export default function App() {
                   className="headline-card"
                   onClick={() => handleSelectSuggestion(s)}
                 >
-                  <span className="headline-card-title">{s.title}</span>
-                  <span className="headline-card-meta">
-                    <span className="headline-source">{s.source}</span>
-                    {s.published && <span className="headline-date">{s.published}</span>}
+                  <span className="headline-card-title">{s.topic}</span>
+                  <span className="headline-card-stats">
+                    <span className="headline-stat">{s.article_count} article{s.article_count !== 1 ? "s" : ""}</span>
+                    <span className="headline-stat">{s.sources.length} source{s.sources.length !== 1 ? "s" : ""}</span>
                   </span>
-                  <span className="headline-card-action">+ Track this story</span>
+                  <span className="headline-card-meta">
+                    {s.sources.map((src, j) => (
+                      <span key={j} className="headline-source">{src}</span>
+                    ))}
+                  </span>
+                  {s.sample_headlines.length > 1 && (
+                    <ul className="headline-samples">
+                      {s.sample_headlines.slice(0, 3).map((h, j) => (
+                        <li key={j}>{h}</li>
+                      ))}
+                    </ul>
+                  )}
+                  <span className="headline-card-action">+ Track this situation</span>
                 </button>
               ))}
             </div>
@@ -494,7 +504,7 @@ export default function App() {
 
         {!showSuggestions && !suggestionsLoading && suggestionSearch.trim() && (
           <p className="muted" style={{ textAlign: "center", padding: "12px 0" }}>
-            No headlines found. Try a different search term or fill in the form below.
+            No situations found. Try a different search term or fill in the form below.
           </p>
         )}
 

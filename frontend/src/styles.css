@@ -310,9 +310,20 @@ pre {
   line-height: 1.35;
 }
 
+.headline-card-stats {
+  display: flex;
+  gap: 12px;
+}
+
+.headline-stat {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0b7a43;
+}
+
 .headline-card-meta {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   flex-wrap: wrap;
 }
@@ -326,9 +337,26 @@ pre {
   border-radius: 10px;
 }
 
-.headline-date {
-  font-size: 11px;
-  color: #8a9ab5;
+.headline-samples {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  width: 100%;
+}
+
+.headline-samples li {
+  font-size: 12px;
+  color: #54657f;
+  padding: 2px 0;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headline-samples li::before {
+  content: "\2022 ";
+  color: #c3cedf;
 }
 
 .headline-card-action {

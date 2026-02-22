@@ -29,7 +29,7 @@ from .schemas import (
     FeedSourceCreate,
     FeedSourceRead,
     LoginRequest,
-    NewsSuggestionItem,
+    SituationSuggestion,
     SituationArticleRead,
     SituationCreate,
     SituationRead,
@@ -552,7 +552,17 @@ def list_feed_articles(
     return db.scalars(stmt).all()
 
 
-# ── News Suggestions (Authenticated) ─────────────────────────────
+# ── Situation Suggestions (Authenticated) ─────────────────────────
+
+# Stop-words excluded when extracting topic keywords from headlines
+_STOP_WORDS = frozenset(
+    "a an the and or but in on at to for of is it by with from as be was were "
+    "are been has have had do does did will would could should may might can "
+    "not no this that these those its his her he she they we you i my your our "
+    "their who what when where how why all each every any some new says said "
+    "after over about up into out also just than more very so if than being us "
+    "vs get gets got".split()
+)
 
 
 def _extract_source_name(entry) -> str:
@@ -562,11 +572,12 @@ def _extract_source_name(entry) -> str:
     author = getattr(entry, "author", None)
     if author:
         return author
-    return "Unknown Source"
+    return "Unknown"
 
 
-def _clean_query(title: str, source: str) -> str:
-    if source and source != "Unknown Source":
+def _clean_title(title: str, source: str) -> str:
+    """Strip trailing ' - Source Name' suffix from Google News titles."""
+    if source and source != "Unknown":
         suffix = f" - {source}"
         if title.endswith(suffix):
             return title[: -len(suffix)].strip()
@@ -574,7 +585,80 @@ def _clean_query(title: str, source: str) -> str:
     return cleaned or title
 
 
-@app.get("/news-suggestions", response_model=list[NewsSuggestionItem])
+def _extract_keywords(text: str) -> set[str]:
+    """Extract meaningful lowercase keywords from a headline."""
+    words = re.findall(r"[A-Za-z'\u2019]{3,}", text)
+    return {w.lower() for w in words if w.lower() not in _STOP_WORDS}
+
+
+def _cluster_articles(entries: list[dict]) -> list[dict]:
+    """
+    Group articles into situation clusters based on shared keywords.
+    Articles sharing 2+ keywords with a cluster's seed get grouped together.
+    """
+    clusters: list[dict] = []
+
+    for entry in entries:
+        title = entry["title"]
+        keywords = entry["keywords"]
+        source = entry["source"]
+
+        # Try to find an existing cluster that shares keywords
+        best_cluster = None
+        best_overlap = 0
+        for cluster in clusters:
+            overlap = len(keywords & cluster["keywords"])
+            if overlap >= 2 and overlap > best_overlap:
+                best_cluster = cluster
+                best_overlap = overlap
+
+        if best_cluster:
+            best_cluster["headlines"].append(title)
+            best_cluster["sources"].add(source)
+            best_cluster["keywords"] |= keywords
+        else:
+            clusters.append({
+                "seed_title": title,
+                "headlines": [title],
+                "sources": {source},
+                "keywords": set(keywords),
+            })
+
+    return clusters
+
+
+def _cluster_to_suggestion(cluster: dict, search_term: str) -> dict:
+    """Convert a cluster into a SituationSuggestion response dict."""
+    headlines = cluster["headlines"]
+    sources = sorted(cluster["sources"] - {"Unknown"})
+    seed = cluster["seed_title"]
+
+    # Build a readable topic name from the seed headline (truncate if long)
+    topic = seed if len(seed) <= 80 else seed[:77] + "..."
+
+    # Build a query from the most common keywords in the cluster
+    keyword_list = sorted(cluster["keywords"] - _STOP_WORDS)
+    # Use the search term plus top cluster keywords for the query
+    query = search_term
+
+    # Build a description summarizing the situation
+    description = (
+        f"{len(headlines)} article{'s' if len(headlines) != 1 else ''} "
+        f"from {len(sources)} source{'s' if len(sources) != 1 else ''}. "
+        f"Covering: {'; '.join(headlines[:3])}"
+    )
+
+    return {
+        "topic": topic,
+        "query": query,
+        "description": description,
+        "article_count": len(headlines),
+        "sources": sources[:5],
+        "sample_headlines": headlines[:3],
+    }
+
+
+@app.get("/news-suggestions", response_model=list[SituationSuggestion])
 def get_news_suggestions(
     q: str = Query(default="", min_length=1, max_length=200),
     _user: AppUser = Depends(get_current_user),
@@ -588,6 +672,7 @@ def get_news_suggestions(
     if cached and cached[0] > now:
         return cached[1]
 
+    # Fetch a larger batch of articles so we have enough to cluster
     rss_url = (
         f"https://news.google.com/rss/search"
         f"?q={q.strip()}&hl=en-US&gl=US&ceid=US:en"
@@ -597,32 +682,34 @@ def get_news_suggestions(
     except Exception:
         raise HTTPException(status_code=502, detail="Failed to reach Google News")
 
-    results = []
-    for entry in parsed.entries[:10]:
-        title = getattr(entry, "title", None)
+    # Parse all entries into a flat list
+    entries = []
+    for entry in parsed.entries[:30]:
+        title_raw = getattr(entry, "title", None)
         link = getattr(entry, "link", None)
-        if not title or not link:
+        if not title_raw or not link:
             continue
-
         source = _extract_source_name(entry)
-        suggested_query = _clean_query(title, source)
+        title = _clean_title(title_raw, source)
+        keywords = _extract_keywords(title)
+        if not keywords:
+            continue
+        entries.append({"title": title, "source": source, "keywords": keywords})
 
-        pub_struct = getattr(entry, "published_parsed", None)
-        published = None
-        if pub_struct:
-            try:
-                dt = datetime(*pub_struct[:6], tzinfo=timezone.utc)
-                published = dt.strftime("%b %d, %Y")
-            except Exception:
-                published = None
+    if not entries:
+        _suggestions_cache[normalized] = (now + _SUGGESTIONS_TTL_SECONDS, [])
+        return []
 
-        results.append({
-            "title": title,
-            "source": source,
-            "published": published,
-            "link": link,
-            "suggested_query": suggested_query,
-        })
+    # Cluster articles into situations
+    clusters = _cluster_articles(entries)
+
+    # Sort: largest clusters first, then convert to response format
+    clusters.sort(key=lambda c: len(c["headlines"]), reverse=True)
+
+    results = [
+        _cluster_to_suggestion(cluster, q.strip())
+        for cluster in clusters[:8]
+    ]
 
     if len(_suggestions_cache) > 500:
         _suggestions_cache.clear()

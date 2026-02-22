@@ -153,9 +153,10 @@ class DashboardRead(BaseModel):
     trend_notes: str | None = None
 
 
-class NewsSuggestionItem(BaseModel):
-    title: str
-    source: str
-    published: str | None
-    link: str
-    suggested_query: str
+class SituationSuggestion(BaseModel):
+    topic: str
+    query: str
+    description: str
+    article_count: int
+    sources: list[str]
+    sample_headlines: list[str]
