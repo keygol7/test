@@ -320,7 +320,6 @@ def create_situation_from_suggestion(
 
 @app.get("/situations", response_model=list[SituationRead])
 def list_situations(
-    user_id: UUID | None = None,
     is_active: bool | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -328,10 +327,8 @@ def list_situations(
     current_user: AppUser = Depends(get_current_user),
 ) -> list[Situation]:
     stmt = select(Situation)
-    if not current_user.is_admin:
-        stmt = stmt.where(Situation.user_id == current_user.id)
-    elif user_id is not None:
-        stmt = stmt.where(Situation.user_id == user_id)
+    # Always show only the current user's own situations
+    stmt = stmt.where(Situation.user_id == current_user.id)
     if is_active is not None:
         stmt = stmt.where(Situation.is_active == is_active)
     stmt = stmt.order_by(desc(Situation.updated_at)).limit(limit).offset(offset)
@@ -1023,7 +1020,7 @@ def get_news_suggestions(
         sources = sorted(cluster["sources"] - {"Unknown"})
         topic = _generate_topic_name(cluster)
 
-        query = q.strip()
+        query = topic
 
         description = (
             f"Ongoing situation with {len(headlines)} articles from "
