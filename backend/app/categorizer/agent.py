@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 
 from mcp import ClientSession
@@ -24,10 +25,16 @@ LLM_BATCH_SIZE = 10
 
 
 def _get_server_params() -> StdioServerParameters:
-    """Build MCP server subprocess parameters."""
+    """Build MCP server subprocess parameters.
+
+    Explicitly passes the current environment so the subprocess inherits
+    DATABASE_URL and other Docker env vars (the MCP SDK may not inherit
+    them automatically in all contexts).
+    """
     return StdioServerParameters(
         command=sys.executable,
         args=["-m", "backend.app.mcp_server.server"],
+        env=dict(os.environ),
     )
 
 
