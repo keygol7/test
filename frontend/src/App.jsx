@@ -60,6 +60,12 @@ export default function App() {
   const [situationQuery, setSituationQuery] = useState("");
   const [situationDescription, setSituationDescription] = useState("");
 
+  // Suggestion search state
+  const [suggestionSearch, setSuggestionSearch] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
   const [articleUrl, setArticleUrl] = useState("");
   const [articleTitle, setArticleTitle] = useState("");
   const [articleSource, setArticleSource] = useState("");
@@ -97,6 +103,38 @@ export default function App() {
         });
     }
   }, [baseUrl]);
+
+  // Debounced news suggestion search
+  useEffect(() => {
+    const trimmed = suggestionSearch.trim();
+    if (!trimmed) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setSuggestionsLoading(true);
+      try {
+        const encoded = encodeURIComponent(trimmed);
+        const data = await httpJson(`${baseUrl}/news-suggestions?q=${encoded}`);
+        if (data && data.length > 0) {
+          setSuggestions(data);
+          setShowSuggestions(true);
+        } else {
+          setSuggestions([]);
+          setShowSuggestions(false);
+        }
+      } catch {
+        setSuggestions([]);
+        setShowSuggestions(false);
+      } finally {
+        setSuggestionsLoading(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [suggestionSearch, baseUrl]);
 
   async function run(action) {
     setLoading(true);
@@ -167,6 +205,19 @@ export default function App() {
     setDashboard(null);
     setHealth("");
     setMessage("");
+  }
+
+  function handleSelectSuggestion(suggestion) {
+    setSituationTitle(suggestion.title);
+    setSituationQuery(suggestion.suggested_query);
+    setSituationDescription(
+      `Tracking: ${suggestion.title}. Source: ${suggestion.source}.${
+        suggestion.published ? " Published: " + suggestion.published + "." : ""
+      }`
+    );
+    setSuggestionSearch("");
+    setSuggestions([]);
+    setShowSuggestions(false);
   }
 
   // ── Not logged in: show login / register ──
@@ -361,6 +412,42 @@ export default function App() {
       {/* All users: Create Situation */}
       <section className="card">
         <h2>Create Situation</h2>
+
+        {/* Suggestion search */}
+        <div className="suggestion-wrapper">
+          <label>
+            Search for a News Topic
+            <input
+              value={suggestionSearch}
+              onChange={(e) => setSuggestionSearch(e.target.value)}
+              placeholder="e.g. AI regulation, climate summit..."
+              autoComplete="off"
+            />
+          </label>
+          {suggestionsLoading && (
+            <p className="muted" style={{ fontSize: 12, margin: "4px 0" }}>
+              Searching...
+            </p>
+          )}
+          {showSuggestions && suggestions.length > 0 && (
+            <ul className="suggestion-dropdown">
+              {suggestions.map((s, i) => (
+                <li
+                  key={i}
+                  className="suggestion-item"
+                  onClick={() => handleSelectSuggestion(s)}
+                >
+                  <span className="suggestion-title">{s.title}</span>
+                  <span className="suggestion-meta">
+                    {s.source}
+                    {s.published ? ` · ${s.published}` : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
         {isAdmin ? (
           <label>
             User ID

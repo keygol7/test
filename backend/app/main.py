@@ -1,3 +1,5 @@
+import re
+import time
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -17,6 +19,8 @@ from .auth import (
 from .config import settings
 from .database import get_db
 from .models import AppUser, Article, DashboardSnapshot, FeedArticle, FeedSource, Situation, SituationArticle, Source
+import feedparser as _feedparser
+
 from .schemas import (
     ArticleIngest,
     ArticleRead,
@@ -25,6 +29,7 @@ from .schemas import (
     FeedSourceCreate,
     FeedSourceRead,
     LoginRequest,
+    NewsSuggestionItem,
     SituationArticleRead,
     SituationCreate,
     SituationRead,
@@ -36,6 +41,10 @@ from .schemas import (
 )
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
+
+# ── News Suggestions Cache ───────────────────────────────────────
+_suggestions_cache: dict[str, tuple[float, list[dict]]] = {}
+_SUGGESTIONS_TTL_SECONDS = 300  # 5 minutes
 
 if settings.cors_origins:
     app.add_middleware(
@@ -541,3 +550,81 @@ def list_feed_articles(
     stmt = stmt.order_by(FeedArticle.published_date.desc().nullslast(), FeedArticle.ingested_at.desc())
     stmt = stmt.limit(limit).offset(offset)
     return db.scalars(stmt).all()
+
+
+# ── News Suggestions (Authenticated) ─────────────────────────────
+
+
+def _extract_source_name(entry) -> str:
+    src = getattr(entry, "source", None)
+    if src and isinstance(src, dict) and src.get("title"):
+        return src["title"]
+    author = getattr(entry, "author", None)
+    if author:
+        return author
+    return "Unknown Source"
+
+
+def _clean_query(title: str, source: str) -> str:
+    if source and source != "Unknown Source":
+        suffix = f" - {source}"
+        if title.endswith(suffix):
+            return title[: -len(suffix)].strip()
+    cleaned = re.sub(r"\s+-\s+[^-]+$", "", title).strip()
+    return cleaned or title
+
+
+@app.get("/news-suggestions", response_model=list[NewsSuggestionItem])
+def get_news_suggestions(
+    q: str = Query(default="", min_length=1, max_length=200),
+    _user: AppUser = Depends(get_current_user),
+) -> list[dict]:
+    normalized = q.strip().lower()
+    if not normalized:
+        return []
+
+    now = time.time()
+    cached = _suggestions_cache.get(normalized)
+    if cached and cached[0] > now:
+        return cached[1]
+
+    rss_url = (
+        f"https://news.google.com/rss/search"
+        f"?q={q.strip()}&hl=en-US&gl=US&ceid=US:en"
+    )
+    try:
+        parsed = _feedparser.parse(rss_url)
+    except Exception:
+        raise HTTPException(status_code=502, detail="Failed to reach Google News")
+
+    results = []
+    for entry in parsed.entries[:10]:
+        title = getattr(entry, "title", None)
+        link = getattr(entry, "link", None)
+        if not title or not link:
+            continue
+
+        source = _extract_source_name(entry)
+        suggested_query = _clean_query(title, source)
+
+        pub_struct = getattr(entry, "published_parsed", None)
+        published = None
+        if pub_struct:
+            try:
+                dt = datetime(*pub_struct[:6], tzinfo=timezone.utc)
+                published = dt.strftime("%b %d, %Y")
+            except Exception:
+                published = None
+
+        results.append({
+            "title": title,
+            "source": source,
+            "published": published,
+            "link": link,
+            "suggested_query": suggested_query,
+        })
+
+    if len(_suggestions_cache) > 500:
+        _suggestions_cache.clear()
+    _suggestions_cache[normalized] = (now + _SUGGESTIONS_TTL_SECONDS, results)
+    return results
