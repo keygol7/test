@@ -199,7 +199,23 @@ export default function App() {
     }
   }, [baseUrl]);
 
-  // Auto-load situations and trending topics when logged in
+  // Refresh situations: call backend to find new articles, then reload situations & dashboards
+  async function refreshSituations() {
+    try {
+      const result = await httpJson(`${baseUrl}/situations/refresh`, { method: "POST" });
+      if (result && result.new_articles > 0) {
+        // Reload situations list and clear cached dashboards so they refresh
+        const data = await httpJson(`${baseUrl}/situations`);
+        if (data) setSituations(data);
+        setDashboards({});
+        if (expandedSituationId) loadDashboard(expandedSituationId);
+      }
+    } catch {
+      // silent — don't interrupt user
+    }
+  }
+
+  // Auto-load situations and trending topics when logged in, then refresh
   useEffect(() => {
     if (user) {
       httpJson(`${baseUrl}/situations`)
@@ -208,7 +224,16 @@ export default function App() {
       httpJson(`${baseUrl}/trending-topics?limit=30`)
         .then((data) => { if (data) setTrendingTopics(data); })
         .catch(() => {});
+      // Refresh situations on login to pick up new articles
+      refreshSituations();
     }
+  }, [user, baseUrl]);
+
+  // Refresh situations every 60 seconds
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(refreshSituations, 60_000);
+    return () => clearInterval(interval);
   }, [user, baseUrl]);
 
   // Auto-load feed articles when switching to articles view

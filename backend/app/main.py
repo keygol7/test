@@ -366,6 +366,111 @@ def update_situation(
     return situation
 
 
+@app.post("/situations/refresh")
+def refresh_situations(
+    db: Session = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
+) -> dict:
+    """Re-scan feed articles for all active situations and link new matches."""
+    stmt = select(Situation).where(
+        Situation.user_id == current_user.id,
+        Situation.is_active.is_(True),
+    )
+    situations = db.scalars(stmt).all()
+    if not situations:
+        return {"refreshed": 0, "new_articles": 0}
+
+    total_new = 0
+    for situation in situations:
+        search_words = situation.query.strip().lower().split()
+        if not search_words:
+            continue
+
+        # Find matching feed articles
+        fa_stmt = (
+            select(FeedArticle, FeedSource)
+            .join(FeedSource, FeedSource.id == FeedArticle.feed_source_id)
+            .where(FeedSource.is_active.is_(True))
+        )
+        for word in search_words:
+            fa_stmt = fa_stmt.where(FeedArticle.title.ilike(f"%{word}%"))
+        fa_stmt = fa_stmt.order_by(
+            FeedArticle.published_date.desc().nullslast(),
+            FeedArticle.ingested_at.desc(),
+        ).limit(50)
+
+        rows = db.execute(fa_stmt).all()
+        for feed_article, feed_source in rows:
+            # Check if article URL already linked
+            existing_article = db.scalar(
+                select(Article).where(Article.url == feed_article.original_url)
+            )
+            if existing_article:
+                # Check if already linked to this situation
+                existing_link = db.scalar(
+                    select(SituationArticle).where(
+                        SituationArticle.situation_id == situation.id,
+                        SituationArticle.article_id == existing_article.id,
+                    )
+                )
+                if existing_link:
+                    continue
+                # Link existing article
+                db.add(SituationArticle(
+                    situation_id=situation.id,
+                    article_id=existing_article.id,
+                    reason="Auto-refreshed",
+                ))
+                total_new += 1
+            else:
+                # Create source, article, and link
+                source = db.scalar(
+                    select(Source).where(Source.name == feed_source.name, Source.base_url == "")
+                )
+                if not source:
+                    source = Source(name=feed_source.name, base_url="", source_type="news_site")
+                    db.add(source)
+                    try:
+                        db.flush()
+                    except IntegrityError:
+                        db.rollback()
+                        source = db.scalar(
+                            select(Source).where(Source.name == feed_source.name, Source.base_url == "")
+                        )
+                        if not source:
+                            continue
+
+                article = Article(
+                    source_id=source.id,
+                    url=feed_article.original_url,
+                    title=feed_article.title,
+                    author=feed_article.author,
+                    published_at=feed_article.published_date,
+                    summary=feed_article.snippet,
+                    extra_metadata={},
+                )
+                db.add(article)
+                try:
+                    db.flush()
+                except IntegrityError:
+                    db.rollback()
+                    article = db.scalar(select(Article).where(Article.url == feed_article.original_url))
+                    if not article:
+                        continue
+
+                db.add(SituationArticle(
+                    situation_id=situation.id,
+                    article_id=article.id,
+                    reason="Auto-refreshed",
+                ))
+                total_new += 1
+
+    if total_new > 0:
+        db.commit()
+
+    return {"refreshed": len(situations), "new_articles": total_new}
+
+
 @app.delete("/situations/{situation_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_situation(
     situation_id: UUID,
