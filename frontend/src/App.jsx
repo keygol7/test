@@ -208,16 +208,39 @@ export default function App() {
   }
 
   function handleSelectSuggestion(suggestion) {
-    setSituationTitle(suggestion.title);
-    setSituationQuery(suggestion.suggested_query);
-    setSituationDescription(
-      `Tracking: ${suggestion.title}. Source: ${suggestion.source}.${
-        suggestion.published ? " Published: " + suggestion.published + "." : ""
-      }`
-    );
+    const title = suggestion.title;
+    const query = suggestion.suggested_query;
+    const description = `Tracking: ${title}. Source: ${suggestion.source}.${
+      suggestion.published ? " Published: " + suggestion.published + "." : ""
+    }`;
+
+    setSituationTitle(title);
+    setSituationQuery(query);
+    setSituationDescription(description);
     setSuggestionSearch("");
     setSuggestions([]);
     setShowSuggestions(false);
+
+    // Auto-create the situation immediately
+    run(async () => {
+      const created = await httpJson(`${baseUrl}/situations`, {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: isAdmin && situationUserId ? situationUserId : user.id,
+          title,
+          query,
+          description,
+          is_active: true,
+        }),
+      });
+      setSituations((prev) => [created, ...prev]);
+      setDashboardSituationId(created.id);
+      setArticleSituationIds(created.id);
+      setSituationTitle("");
+      setSituationQuery("");
+      setSituationDescription("");
+      setMessage(`Created situation: ${title}`);
+    });
   }
 
   // ── Not logged in: show login / register ──
@@ -410,96 +433,127 @@ export default function App() {
       )}
 
       {/* All users: Create Situation */}
-      <section className="card">
+      <section className="card situation-creator">
         <h2>Create Situation</h2>
+        <p className="muted">Search current headlines to quickly create a situation, or fill in the form manually.</p>
 
-        {/* Suggestion search */}
-        <div className="suggestion-wrapper">
-          <label>
-            Search for a News Topic
-            <input
-              value={suggestionSearch}
-              onChange={(e) => setSuggestionSearch(e.target.value)}
-              placeholder="e.g. AI regulation, climate summit..."
-              autoComplete="off"
-            />
-          </label>
-          {suggestionsLoading && (
-            <p className="muted" style={{ fontSize: 12, margin: "4px 0" }}>
-              Searching...
-            </p>
-          )}
-          {showSuggestions && suggestions.length > 0 && (
-            <ul className="suggestion-dropdown">
-              {suggestions.map((s, i) => (
-                <li
-                  key={i}
-                  className="suggestion-item"
-                  onClick={() => handleSelectSuggestion(s)}
-                >
-                  <span className="suggestion-title">{s.title}</span>
-                  <span className="suggestion-meta">
-                    {s.source}
-                    {s.published ? ` · ${s.published}` : ""}
-                  </span>
-                </li>
-              ))}
-            </ul>
+        {/* Live headline search */}
+        <div className="search-bar">
+          <svg className="search-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            className="search-input"
+            value={suggestionSearch}
+            onChange={(e) => setSuggestionSearch(e.target.value)}
+            placeholder="Search headlines... e.g. AI regulation, climate summit, elections"
+            autoComplete="off"
+          />
+          {suggestionSearch && (
+            <button
+              className="search-clear"
+              onClick={() => { setSuggestionSearch(""); setSuggestions([]); setShowSuggestions(false); }}
+              aria-label="Clear search"
+            >
+              &times;
+            </button>
           )}
         </div>
 
-        {isAdmin ? (
+        {suggestionsLoading && (
+          <div className="search-status">
+            <span className="spinner" />
+            Searching live headlines...
+          </div>
+        )}
+
+        {showSuggestions && suggestions.length > 0 && (
+          <div className="headline-results">
+            <p className="headline-results-label">
+              {suggestions.length} headline{suggestions.length !== 1 ? "s" : ""} found — click to create a situation
+            </p>
+            <div className="headline-grid">
+              {suggestions.map((s, i) => (
+                <button
+                  key={i}
+                  className="headline-card"
+                  onClick={() => handleSelectSuggestion(s)}
+                >
+                  <span className="headline-card-title">{s.title}</span>
+                  <span className="headline-card-meta">
+                    <span className="headline-source">{s.source}</span>
+                    {s.published && <span className="headline-date">{s.published}</span>}
+                  </span>
+                  <span className="headline-card-action">+ Track this story</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {!showSuggestions && !suggestionsLoading && suggestionSearch.trim() && (
+          <p className="muted" style={{ textAlign: "center", padding: "12px 0" }}>
+            No headlines found. Try a different search term or fill in the form below.
+          </p>
+        )}
+
+        {/* Manual form — collapsible when suggestions are showing */}
+        <details className="manual-form" open={!showSuggestions || Boolean(situationTitle)}>
+          <summary className="manual-form-toggle">Manual entry</summary>
+          {isAdmin ? (
+            <label>
+              User ID
+              <input
+                value={situationUserId}
+                onChange={(e) => setSituationUserId(e.target.value)}
+                placeholder="UUID"
+              />
+            </label>
+          ) : null}
           <label>
-            User ID
+            Title
+            <input value={situationTitle} onChange={(e) => setSituationTitle(e.target.value)} />
+          </label>
+          <label>
+            Query
             <input
-              value={situationUserId}
-              onChange={(e) => setSituationUserId(e.target.value)}
-              placeholder="UUID"
+              value={situationQuery}
+              onChange={(e) => setSituationQuery(e.target.value)}
+              placeholder="Search terms or prompt"
             />
           </label>
-        ) : null}
-        <label>
-          Title
-          <input value={situationTitle} onChange={(e) => setSituationTitle(e.target.value)} />
-        </label>
-        <label>
-          Query
-          <input
-            value={situationQuery}
-            onChange={(e) => setSituationQuery(e.target.value)}
-            placeholder="Search terms or prompt"
-          />
-        </label>
-        <label>
-          Description
-          <textarea
-            value={situationDescription}
-            onChange={(e) => setSituationDescription(e.target.value)}
-          />
-        </label>
-        <button
-          disabled={loading}
-          onClick={() =>
-            run(async () => {
-              const created = await httpJson(`${baseUrl}/situations`, {
-                method: "POST",
-                body: JSON.stringify({
-                  user_id: isAdmin && situationUserId ? situationUserId : user.id,
-                  title: situationTitle,
-                  query: situationQuery,
-                  description: situationDescription || null,
-                  is_active: true,
-                }),
-              });
-              setSituations((prev) => [created, ...prev]);
-              setDashboardSituationId(created.id);
-              setArticleSituationIds(created.id);
-              setMessage(`Created situation ${created.id}`);
-            })
-          }
-        >
-          Create Situation
-        </button>
+          <label>
+            Description
+            <textarea
+              value={situationDescription}
+              onChange={(e) => setSituationDescription(e.target.value)}
+            />
+          </label>
+          <button
+            disabled={loading}
+            onClick={() =>
+              run(async () => {
+                const created = await httpJson(`${baseUrl}/situations`, {
+                  method: "POST",
+                  body: JSON.stringify({
+                    user_id: isAdmin && situationUserId ? situationUserId : user.id,
+                    title: situationTitle,
+                    query: situationQuery,
+                    description: situationDescription || null,
+                    is_active: true,
+                  }),
+                });
+                setSituations((prev) => [created, ...prev]);
+                setDashboardSituationId(created.id);
+                setArticleSituationIds(created.id);
+                setMessage(`Created situation ${created.id}`);
+              })
+            }
+          >
+            Create Situation
+          </button>
+        </details>
       </section>
 
       {/* Admin only: Ingest Article */}
