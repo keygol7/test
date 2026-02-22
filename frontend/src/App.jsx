@@ -418,7 +418,7 @@ export default function App() {
   }
 
   function handleSelectSuggestion(suggestion) {
-    const topicName = suggestionSearch.trim() || suggestion.topic;
+    const topicName = suggestion.topic || suggestionSearch.trim();
     setSuggestionSearch("");
     setSuggestions([]);
     setShowSuggestions(false);
