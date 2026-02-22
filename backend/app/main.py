@@ -1,5 +1,4 @@
 import re
-import time
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -19,7 +18,6 @@ from .auth import (
 from .config import settings
 from .database import get_db
 from .models import AppUser, Article, DashboardSnapshot, FeedArticle, FeedSource, Situation, SituationArticle, Source
-import feedparser as _feedparser
 
 from .schemas import (
     ArticleIngest,
@@ -42,10 +40,6 @@ from .schemas import (
 )
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
-
-# ── News Suggestions Cache ───────────────────────────────────────
-_suggestions_cache: dict[str, tuple[float, list[dict]]] = {}
-_SUGGESTIONS_TTL_SECONDS = 300  # 5 minutes
 
 if settings.cors_origins:
     app.add_middleware(
@@ -830,59 +824,54 @@ def _cluster_articles(entries: list[dict]) -> list[dict]:
 @app.get("/news-suggestions", response_model=list[SituationSuggestion])
 def get_news_suggestions(
     q: str = Query(default="", min_length=1, max_length=200),
+    db: Session = Depends(get_db),
     _user: AppUser = Depends(get_current_user),
 ) -> list[dict]:
     normalized = q.strip().lower()
     if not normalized:
         return []
 
-    now = time.time()
-    cached = _suggestions_cache.get(normalized)
-    if cached and cached[0] > now:
-        return cached[1]
-
-    rss_url = (
-        f"https://news.google.com/rss/search"
-        f"?q={q.strip()}&hl=en-US&gl=US&ceid=US:en"
+    # Search feed_article table using ILIKE for each keyword
+    search_words = normalized.split()
+    stmt = (
+        select(FeedArticle, FeedSource)
+        .join(FeedSource, FeedSource.id == FeedArticle.feed_source_id)
+        .where(FeedSource.is_active.is_(True))
     )
-    try:
-        parsed = _feedparser.parse(rss_url)
-    except Exception:
-        raise HTTPException(status_code=502, detail="Failed to reach Google News")
+    for word in search_words:
+        stmt = stmt.where(FeedArticle.title.ilike(f"%{word}%"))
+    stmt = stmt.order_by(
+        FeedArticle.published_date.desc().nullslast(),
+        FeedArticle.ingested_at.desc(),
+    ).limit(100)
+
+    rows = db.execute(stmt).all()
+    if not rows:
+        return []
 
     entries = []
-    for entry in parsed.entries[:50]:
-        title_raw = getattr(entry, "title", None)
-        link = getattr(entry, "link", None)
-        if not title_raw or not link:
-            continue
-        source = _extract_source_name(entry)
-        title = _clean_title(title_raw, source)
+    for feed_article, feed_source in rows:
+        title = feed_article.title
+        source_name = feed_source.name
         entities = _extract_entities(title)
         keywords = _extract_keywords(title)
         if not entities and not keywords:
             continue
 
-        pub_struct = getattr(entry, "published_parsed", None)
         published = None
-        if pub_struct:
-            try:
-                dt = datetime(*pub_struct[:6], tzinfo=timezone.utc)
-                published = dt.strftime("%b %d, %Y")
-            except Exception:
-                published = None
+        if feed_article.published_date:
+            published = feed_article.published_date.strftime("%b %d, %Y")
 
         entries.append({
             "title": title,
-            "source": source,
-            "url": link,
+            "source": source_name,
+            "url": feed_article.original_url,
             "published": published,
             "entities": entities,
             "keywords": keywords,
         })
 
     if not entries:
-        _suggestions_cache[normalized] = (now + _SUGGESTIONS_TTL_SECONDS, [])
         return []
 
     clusters = _cluster_articles(entries)
@@ -926,7 +915,4 @@ def get_news_suggestions(
             "articles": cluster["articles"],
         })
 
-    if len(_suggestions_cache) > 500:
-        _suggestions_cache.clear()
-    _suggestions_cache[normalized] = (now + _SUGGESTIONS_TTL_SECONDS, results)
     return results

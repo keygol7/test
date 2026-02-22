@@ -33,16 +33,98 @@ async function httpJson(url, options = {}) {
   return payload;
 }
 
+// ── SVG Icons ──────────────────────────────────────────────
+
+function IconSituations() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+    </svg>
+  );
+}
+
+function IconArticles() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
+    </svg>
+  );
+}
+
+function IconUsers() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 00-3-3.87" />
+      <path d="M16 3.13a4 4 0 010 7.75" />
+    </svg>
+  );
+}
+
+function IconFeeds() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 11a9 9 0 019 9" />
+      <path d="M4 4a16 16 0 0116 16" />
+      <circle cx="5" cy="19" r="1" />
+    </svg>
+  );
+}
+
+function IconIngest() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  );
+}
+
+function IconSystem() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+    </svg>
+  );
+}
+
+function IconSearch() {
+  return (
+    <svg className="search-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+  );
+}
+
+function IconChevron() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+// ── Main App ───────────────────────────────────────────────
+
 export default function App() {
   const [apiBase, setApiBase] = useState(defaultApiBase);
   const [user, setUser] = useState(getUser());
   const [authView, setAuthView] = useState("login");
-  const [health, setHealth] = useState("");
-  const [users, setUsers] = useState([]);
-  const [situations, setSituations] = useState([]);
-  const [dashboard, setDashboard] = useState(null);
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("error"); // "error" | "success"
   const [loading, setLoading] = useState(false);
+
+  // Navigation
+  const [activeView, setActiveView] = useState("situations");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Auth form state
   const [loginEmail, setLoginEmail] = useState("");
@@ -51,14 +133,10 @@ export default function App() {
   const [regDisplayName, setRegDisplayName] = useState("");
   const [regPassword, setRegPassword] = useState("");
 
-  // Existing form state
-  const [userEmail, setUserEmail] = useState("");
-  const [userDisplayName, setUserDisplayName] = useState("");
-
-  const [situationUserId, setSituationUserId] = useState("");
-  const [situationTitle, setSituationTitle] = useState("");
-  const [situationQuery, setSituationQuery] = useState("");
-  const [situationDescription, setSituationDescription] = useState("");
+  // Situations
+  const [situations, setSituations] = useState([]);
+  const [expandedSituationId, setExpandedSituationId] = useState(null);
+  const [dashboards, setDashboards] = useState({}); // { situationId: dashboardData }
 
   // Suggestion search state
   const [suggestionSearch, setSuggestionSearch] = useState("");
@@ -66,21 +144,32 @@ export default function App() {
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
+  // Manual situation form
+  const [situationUserId, setSituationUserId] = useState("");
+  const [situationTitle, setSituationTitle] = useState("");
+  const [situationQuery, setSituationQuery] = useState("");
+  const [situationDescription, setSituationDescription] = useState("");
+
+  // Feed articles
+  const [feedArticles, setFeedArticles] = useState([]);
+  const [articlesLoaded, setArticlesLoaded] = useState(false);
+
+  // Admin state
+  const [users, setUsers] = useState([]);
+  const [userEmail, setUserEmail] = useState("");
+  const [userDisplayName, setUserDisplayName] = useState("");
+  const [feedSources, setFeedSources] = useState([]);
+  const [feedName, setFeedName] = useState("");
+  const [feedUrl, setFeedUrl] = useState("");
+  const [feedCategory, setFeedCategory] = useState("general");
   const [articleUrl, setArticleUrl] = useState("");
   const [articleTitle, setArticleTitle] = useState("");
   const [articleSource, setArticleSource] = useState("");
   const [articleSituationIds, setArticleSituationIds] = useState("");
-
-  const [dashboardSituationId, setDashboardSituationId] = useState("");
-
-  // Feed source state
-  const [feedSources, setFeedSources] = useState([]);
-  const [feedArticles, setFeedArticles] = useState([]);
-  const [feedName, setFeedName] = useState("");
-  const [feedUrl, setFeedUrl] = useState("");
-  const [feedCategory, setFeedCategory] = useState("general");
+  const [health, setHealth] = useState("");
 
   const baseUrl = useMemo(() => apiBase.replace(/\/$/, ""), [apiBase]);
+  const isAdmin = user?.is_admin;
 
   // Validate stored token on mount
   useEffect(() => {
@@ -104,7 +193,38 @@ export default function App() {
     }
   }, [baseUrl]);
 
-  // Debounced news suggestion search
+  // Auto-load situations when logged in
+  useEffect(() => {
+    if (user) {
+      httpJson(`${baseUrl}/situations`)
+        .then((data) => { if (data) setSituations(data); })
+        .catch(() => {});
+    }
+  }, [user, baseUrl]);
+
+  // Auto-load feed articles when switching to articles view
+  useEffect(() => {
+    if (user && activeView === "articles" && !articlesLoaded) {
+      httpJson(`${baseUrl}/feed-articles?limit=30`)
+        .then((data) => { if (data) { setFeedArticles(data); setArticlesLoaded(true); } })
+        .catch(() => {});
+    }
+  }, [user, activeView, articlesLoaded, baseUrl]);
+
+  // Auto-load admin data
+  useEffect(() => {
+    if (user && isAdmin && activeView === "admin-users" && users.length === 0) {
+      httpJson(`${baseUrl}/users`).then((data) => { if (data) setUsers(data); }).catch(() => {});
+    }
+  }, [user, isAdmin, activeView, baseUrl]);
+
+  useEffect(() => {
+    if (user && isAdmin && activeView === "admin-feeds" && feedSources.length === 0) {
+      httpJson(`${baseUrl}/feed-sources`).then((data) => { if (data) setFeedSources(data); }).catch(() => {});
+    }
+  }, [user, isAdmin, activeView, baseUrl]);
+
+  // Debounced suggestion search
   useEffect(() => {
     const trimmed = suggestionSearch.trim();
     if (!trimmed) {
@@ -136,6 +256,8 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [suggestionSearch, baseUrl]);
 
+  // ── Helpers ────────────────────────────────────────────────
+
   async function run(action) {
     setLoading(true);
     setMessage("");
@@ -143,24 +265,48 @@ export default function App() {
       await action();
     } catch (error) {
       setMessage(error.message || "Unexpected error");
+      setMessageType("error");
     } finally {
       setLoading(false);
     }
   }
 
-  function parseUuidCsv(text) {
-    return text
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+  function showSuccess(msg) {
+    setMessage(msg);
+    setMessageType("success");
+    setTimeout(() => setMessage(""), 4000);
   }
 
-  function headline(value) {
-    if (!value || value.length === 0) {
-      return "No headlines yet";
-    }
-    return value.join(" | ");
+  function parseUuidCsv(text) {
+    return text.split(",").map((s) => s.trim()).filter(Boolean);
   }
+
+  function navigate(view) {
+    setActiveView(view);
+    setSidebarOpen(false);
+    setMessage("");
+  }
+
+  async function loadDashboard(situationId) {
+    if (dashboards[situationId]) return; // already loaded
+    try {
+      const data = await httpJson(`${baseUrl}/situations/${situationId}/dashboard`);
+      if (data) setDashboards((prev) => ({ ...prev, [situationId]: data }));
+    } catch {
+      // silently fail
+    }
+  }
+
+  function toggleSituation(id) {
+    if (expandedSituationId === id) {
+      setExpandedSituationId(null);
+    } else {
+      setExpandedSituationId(id);
+      loadDashboard(id);
+    }
+  }
+
+  // ── Auth handlers ──────────────────────────────────────────
 
   async function handleLogin() {
     await run(async () => {
@@ -202,9 +348,12 @@ export default function App() {
     setUser(null);
     setUsers([]);
     setSituations([]);
-    setDashboard(null);
+    setDashboards({});
     setHealth("");
     setMessage("");
+    setFeedArticles([]);
+    setArticlesLoaded(false);
+    setFeedSources([]);
   }
 
   function handleSelectSuggestion(suggestion) {
@@ -212,7 +361,6 @@ export default function App() {
     setSuggestions([]);
     setShowSuggestions(false);
 
-    // Create the situation with its articles via the new endpoint
     run(async () => {
       const created = await httpJson(`${baseUrl}/situations/from-suggestion`, {
         method: "POST",
@@ -224,24 +372,23 @@ export default function App() {
         }),
       });
       setSituations((prev) => [created, ...prev]);
-      setDashboardSituationId(created.id);
-      setArticleSituationIds(created.id);
-      setMessage(
-        `Created situation "${created.title}" with ${suggestion.article_count} articles`
-      );
+      setExpandedSituationId(created.id);
+      loadDashboard(created.id);
+      showSuccess(`Created "${created.title}" with ${suggestion.article_count} articles`);
     });
   }
 
-  // ── Not logged in: show login / register ──
+  // ── Auth Screen ────────────────────────────────────────────
 
   if (!user) {
     return (
-      <main className="layout">
-        <section className="card auth-card">
+      <div className="auth-wrapper">
+        <section className="auth-card">
+          <div className="auth-logo">Broncos News Dash</div>
           {authView === "login" ? (
             <>
-              <h1>Sign In</h1>
-              <p className="muted">Log in to your News Situation Dashboard account.</p>
+              <h1>Welcome back</h1>
+              <p className="auth-subtitle">Sign in to your account</p>
               <label>
                 Email
                 <input
@@ -260,10 +407,10 @@ export default function App() {
                   placeholder="Your password"
                 />
               </label>
-              <button disabled={loading} onClick={handleLogin}>
+              <button disabled={loading} onClick={handleLogin} style={{ width: "100%", marginTop: 4 }}>
                 {loading ? "Signing in..." : "Sign In"}
               </button>
-              <p className="muted">
+              <p className="muted" style={{ marginTop: 16, textAlign: "center" }}>
                 No account?{" "}
                 <a className="auth-toggle" onClick={() => { setAuthView("register"); setMessage(""); }}>
                   Register
@@ -272,8 +419,8 @@ export default function App() {
             </>
           ) : (
             <>
-              <h1>Register</h1>
-              <p className="muted">Create a new account. The first user automatically becomes admin.</p>
+              <h1>Create account</h1>
+              <p className="auth-subtitle">The first user automatically becomes admin.</p>
               <label>
                 Email
                 <input
@@ -300,10 +447,10 @@ export default function App() {
                   placeholder="Min 8 characters"
                 />
               </label>
-              <button disabled={loading} onClick={handleRegister}>
+              <button disabled={loading} onClick={handleRegister} style={{ width: "100%", marginTop: 4 }}>
                 {loading ? "Creating account..." : "Register"}
               </button>
-              <p className="muted">
+              <p className="muted" style={{ marginTop: 16, textAlign: "center" }}>
                 Already have an account?{" "}
                 <a className="auth-toggle" onClick={() => { setAuthView("login"); setMessage(""); }}>
                   Sign In
@@ -311,485 +458,615 @@ export default function App() {
               </p>
             </>
           )}
-          {message ? <p className="err">{message}</p> : null}
-
-          <label className="muted" style={{ marginTop: 16, fontSize: 12 }}>
-            API Base URL
-            <input value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
-          </label>
+          {message && <p className="err" style={{ marginTop: 12, textAlign: "center" }}>{message}</p>}
         </section>
-      </main>
+      </div>
     );
   }
 
-  // ── Logged in: show dashboard ──
-
-  const isAdmin = user.is_admin;
+  // ── Authenticated Layout ───────────────────────────────────
 
   return (
-    <main className="layout">
-      <section className="card header-bar">
-        <h1>News Situation Dashboard</h1>
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <p className="muted">
-            Logged in as <strong>{user.display_name}</strong>{" "}
-            <span className={isAdmin ? "badge admin" : "badge"}>{isAdmin ? "Admin" : "User"}</span>
-          </p>
-          <button className="btn-outline" onClick={handleLogout}>Logout</button>
+    <div className="app-layout">
+      {/* Mobile header */}
+      <div className="mobile-header">
+        <h1>Broncos News Dash</h1>
+        <button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)}>
+          {sidebarOpen ? "\u2715" : "\u2630"}
+        </button>
+      </div>
+
+      {/* Sidebar */}
+      <aside className={`sidebar${sidebarOpen ? " open" : ""}`}>
+        <div className="sidebar-brand">
+          <h1>Broncos News Dash</h1>
+          <p>Situation Tracker</p>
         </div>
-        <label className="muted" style={{ fontSize: 12 }}>
-          API Base URL
-          <input value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
-        </label>
-        <div className="row">
-          <button
-            disabled={loading}
-            onClick={() =>
-              run(async () => {
-                const data = await httpJson(`${baseUrl}/health`);
-                setHealth(`${data.status} (${data.service})`);
-              })
-            }
-          >
-            Check Health
+
+        <div className="sidebar-user">
+          <div className="sidebar-user-name">{user.display_name}</div>
+          <span className={`sidebar-user-role ${isAdmin ? "admin" : "user"}`}>
+            {isAdmin ? "Admin" : "User"}
+          </span>
+        </div>
+
+        <nav className="sidebar-nav">
+          <button className={`nav-item${activeView === "situations" ? " active" : ""}`} onClick={() => navigate("situations")}>
+            <IconSituations /> My Situations
           </button>
+          <button className={`nav-item${activeView === "articles" ? " active" : ""}`} onClick={() => navigate("articles")}>
+            <IconArticles /> Browse Articles
+          </button>
+
           {isAdmin && (
-            <button
-              disabled={loading}
-              onClick={() =>
-                run(async () => {
-                  const data = await httpJson(`${baseUrl}/users`);
-                  setUsers(data);
-                })
-              }
-            >
-              Load Users
-            </button>
+            <>
+              <div className="nav-section-label">Admin</div>
+              <button className={`nav-item${activeView === "admin-users" ? " active" : ""}`} onClick={() => navigate("admin-users")}>
+                <IconUsers /> Users
+              </button>
+              <button className={`nav-item${activeView === "admin-feeds" ? " active" : ""}`} onClick={() => navigate("admin-feeds")}>
+                <IconFeeds /> RSS Feeds
+              </button>
+              <button className={`nav-item${activeView === "admin-ingest" ? " active" : ""}`} onClick={() => navigate("admin-ingest")}>
+                <IconIngest /> Ingest Articles
+              </button>
+              <button className={`nav-item${activeView === "admin-system" ? " active" : ""}`} onClick={() => navigate("admin-system")}>
+                <IconSystem /> System
+              </button>
+            </>
           )}
-          <button
-            disabled={loading}
-            onClick={() =>
-              run(async () => {
-                const data = await httpJson(`${baseUrl}/situations`);
-                setSituations(data);
-              })
-            }
-          >
-            Load Situations
-          </button>
+        </nav>
+
+        <div className="sidebar-footer">
+          <button onClick={handleLogout}>Sign Out</button>
         </div>
-        {health ? <p className="ok">Health: {health}</p> : null}
-        {message ? <p className="err">{message}</p> : null}
-      </section>
+      </aside>
 
-      {/* Admin only: Create User */}
-      {isAdmin && (
-        <section className="card">
-          <h2>Create User</h2>
-          <label>
-            Email
-            <input
-              value={userEmail}
-              onChange={(e) => setUserEmail(e.target.value)}
-              placeholder="you@example.com"
-            />
-          </label>
-          <label>
-            Display Name
-            <input
-              value={userDisplayName}
-              onChange={(e) => setUserDisplayName(e.target.value)}
-              placeholder="Your Name"
-            />
-          </label>
-          <button
-            disabled={loading}
-            onClick={() =>
-              run(async () => {
-                const created = await httpJson(`${baseUrl}/users`, {
-                  method: "POST",
-                  body: JSON.stringify({ email: userEmail, display_name: userDisplayName }),
-                });
-                setUsers((prev) => [created, ...prev]);
-                setSituationUserId(created.id);
-                setMessage(`Created user ${created.id}`);
-              })
-            }
-          >
-            Create User
-          </button>
-        </section>
-      )}
-
-      {/* All users: Create Situation */}
-      <section className="card situation-creator">
-        <h2>Create Situation</h2>
-        <p className="muted">Search for news situations to track, or fill in the form manually below.</p>
-
-        {/* Live headline search */}
-        <div className="search-bar">
-          <svg className="search-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <input
-            className="search-input"
-            value={suggestionSearch}
-            onChange={(e) => setSuggestionSearch(e.target.value)}
-            placeholder="Search news situations... e.g. AI regulation, climate summit, elections"
-            autoComplete="off"
-          />
-          {suggestionSearch && (
-            <button
-              className="search-clear"
-              onClick={() => { setSuggestionSearch(""); setSuggestions([]); setShowSuggestions(false); }}
-              aria-label="Clear search"
-            >
-              &times;
-            </button>
-          )}
-        </div>
-
-        {suggestionsLoading && (
-          <div className="search-status">
-            <span className="spinner" />
-            Finding news situations...
-          </div>
+      {/* Main Content */}
+      <main className="main-content">
+        {message && (
+          <div className={`message-bar ${messageType}`}>{message}</div>
         )}
 
-        {showSuggestions && suggestions.length > 0 && (
-          <div className="headline-results">
-            <p className="headline-results-label">
-              {suggestions.length} situation{suggestions.length !== 1 ? "s" : ""} found — click to start tracking
-            </p>
-            <div className="headline-grid">
-              {suggestions.map((s, i) => (
-                <button
-                  key={i}
-                  className="headline-card"
-                  onClick={() => handleSelectSuggestion(s)}
-                >
-                  <span className="headline-card-title">{s.topic}</span>
-                  <span className="headline-card-stats">
-                    <span className="headline-stat">{s.article_count} article{s.article_count !== 1 ? "s" : ""}</span>
-                    <span className="headline-stat">{s.sources.length} source{s.sources.length !== 1 ? "s" : ""}</span>
-                  </span>
-                  <span className="headline-card-meta">
-                    {s.sources.map((src, j) => (
-                      <span key={j} className="headline-source">{src}</span>
-                    ))}
-                  </span>
-                  {s.sample_headlines.length > 1 && (
-                    <ul className="headline-samples">
-                      {s.sample_headlines.slice(0, 3).map((h, j) => (
-                        <li key={j}>{h}</li>
-                      ))}
-                    </ul>
-                  )}
-                  <span className="headline-card-action">+ Track this situation</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {!showSuggestions && !suggestionsLoading && suggestionSearch.trim() && (
-          <p className="muted" style={{ textAlign: "center", padding: "12px 0" }}>
-            No situations found. Try a different search term or fill in the form below.
-          </p>
-        )}
-
-        {/* Manual form — collapsible when suggestions are showing */}
-        <details className="manual-form" open={!showSuggestions || Boolean(situationTitle)}>
-          <summary className="manual-form-toggle">Manual entry</summary>
-          {isAdmin ? (
-            <label>
-              User ID
-              <input
-                value={situationUserId}
-                onChange={(e) => setSituationUserId(e.target.value)}
-                placeholder="UUID"
-              />
-            </label>
-          ) : null}
-          <label>
-            Title
-            <input value={situationTitle} onChange={(e) => setSituationTitle(e.target.value)} />
-          </label>
-          <label>
-            Query
-            <input
-              value={situationQuery}
-              onChange={(e) => setSituationQuery(e.target.value)}
-              placeholder="Search terms or prompt"
-            />
-          </label>
-          <label>
-            Description
-            <textarea
-              value={situationDescription}
-              onChange={(e) => setSituationDescription(e.target.value)}
-            />
-          </label>
-          <button
-            disabled={loading}
-            onClick={() =>
-              run(async () => {
-                const created = await httpJson(`${baseUrl}/situations`, {
-                  method: "POST",
-                  body: JSON.stringify({
-                    user_id: isAdmin && situationUserId ? situationUserId : user.id,
-                    title: situationTitle,
-                    query: situationQuery,
-                    description: situationDescription || null,
-                    is_active: true,
-                  }),
-                });
-                setSituations((prev) => [created, ...prev]);
-                setDashboardSituationId(created.id);
-                setArticleSituationIds(created.id);
-                setMessage(`Created situation ${created.id}`);
-              })
-            }
-          >
-            Create Situation
-          </button>
-        </details>
-      </section>
-
-      {/* Admin only: Ingest Article */}
-      {isAdmin && (
-        <section className="card">
-          <h2>Ingest Article</h2>
-          <label>
-            URL
-            <input
-              value={articleUrl}
-              onChange={(e) => setArticleUrl(e.target.value)}
-              placeholder="https://example.com/news/story"
-            />
-          </label>
-          <label>
-            Title
-            <input value={articleTitle} onChange={(e) => setArticleTitle(e.target.value)} />
-          </label>
-          <label>
-            Source Name
-            <input value={articleSource} onChange={(e) => setArticleSource(e.target.value)} />
-          </label>
-          <label>
-            Situation IDs (comma-separated)
-            <input
-              value={articleSituationIds}
-              onChange={(e) => setArticleSituationIds(e.target.value)}
-              placeholder="uuid1,uuid2"
-            />
-          </label>
-          <button
-            disabled={loading}
-            onClick={() =>
-              run(async () => {
-                await httpJson(`${baseUrl}/articles/ingest`, {
-                  method: "POST",
-                  body: JSON.stringify({
-                    url: articleUrl,
-                    title: articleTitle,
-                    source_name: articleSource,
-                    source_type: "news_site",
-                    situation_ids: parseUuidCsv(articleSituationIds),
-                    metadata: {},
-                  }),
-                });
-                setMessage("Article ingested");
-              })
-            }
-          >
-            Ingest Article
-          </button>
-        </section>
-      )}
-
-      {/* Admin only: Manage RSS Feeds */}
-      {isAdmin && (
-        <section className="card">
-          <h2>Manage RSS Feeds</h2>
-          <label>
-            Feed Name
-            <input
-              value={feedName}
-              onChange={(e) => setFeedName(e.target.value)}
-              placeholder="e.g. BBC News"
-            />
-          </label>
-          <label>
-            RSS URL
-            <input
-              value={feedUrl}
-              onChange={(e) => setFeedUrl(e.target.value)}
-              placeholder="https://feeds.bbci.co.uk/news/rss.xml"
-            />
-          </label>
-          <label>
-            Category
-            <input
-              value={feedCategory}
-              onChange={(e) => setFeedCategory(e.target.value)}
-              placeholder="general"
-            />
-          </label>
-          <div className="row">
-            <button
-              disabled={loading}
-              onClick={() =>
-                run(async () => {
-                  const created = await httpJson(`${baseUrl}/feed-sources`, {
-                    method: "POST",
-                    body: JSON.stringify({
-                      name: feedName,
-                      rss_url: feedUrl,
-                      category: feedCategory || "general",
-                    }),
-                  });
-                  setFeedSources((prev) => [created, ...prev]);
-                  setFeedName("");
-                  setFeedUrl("");
-                  setFeedCategory("general");
-                  setMessage(`Added feed: ${created.name}`);
-                })
-              }
-            >
-              Add Feed
-            </button>
-            <button
-              disabled={loading}
-              onClick={() =>
-                run(async () => {
-                  const data = await httpJson(`${baseUrl}/feed-sources`);
-                  setFeedSources(data);
-                })
-              }
-            >
-              Load Feeds
-            </button>
-          </div>
-          {feedSources.length > 0 && (
-            <div className="result">
-              {feedSources.map((fs) => (
-                <div key={fs.id} className="feed-row">
-                  <div>
-                    <strong>{fs.name}</strong>
-                    <span className="badge">{fs.category}</span>
-                    <br />
-                    <span className="muted" style={{ fontSize: 12 }}>{fs.rss_url}</span>
-                    {fs.last_fetched_at && (
-                      <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>
-                        Last fetched: {new Date(fs.last_fetched_at).toLocaleString()}
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    className="btn-outline btn-small"
-                    disabled={loading}
-                    onClick={() =>
-                      run(async () => {
-                        await httpJson(`${baseUrl}/feed-sources/${fs.id}`, {
-                          method: "DELETE",
-                        });
-                        setFeedSources((prev) => prev.filter((f) => f.id !== fs.id));
-                        setMessage(`Removed feed: ${fs.name}`);
-                      })
-                    }
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* All users: Feed Articles */}
-      <section className="card">
-        <h2>Latest Feed Articles</h2>
-        <button
-          disabled={loading}
-          onClick={() =>
-            run(async () => {
-              const data = await httpJson(`${baseUrl}/feed-articles?limit=20`);
-              setFeedArticles(data);
-            })
-          }
-        >
-          Load Articles
-        </button>
-        {feedArticles.length > 0 && (
-          <div className="result">
-            {feedArticles.map((a) => (
-              <div key={a.id} className="feed-article-row">
-                <a href={a.original_url} target="_blank" rel="noopener noreferrer">
-                  <strong>{a.title}</strong>
-                </a>
-                {a.author && <span className="muted"> by {a.author}</span>}
-                {a.published_date && (
-                  <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
-                    {new Date(a.published_date).toLocaleDateString()}
-                  </span>
-                )}
-                {a.snippet && <p className="muted" style={{ fontSize: 13, margin: "4px 0 0" }}>{a.snippet}</p>}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* All users: Dashboard */}
-      <section className="card">
-        <h2>Dashboard</h2>
-        <label>
-          Situation ID
-          <input
-            value={dashboardSituationId}
-            onChange={(e) => setDashboardSituationId(e.target.value)}
-            placeholder="UUID"
-          />
-        </label>
-        <button
-          disabled={loading}
-          onClick={() =>
-            run(async () => {
-              const data = await httpJson(
-                `${baseUrl}/situations/${dashboardSituationId}/dashboard?persist_snapshot=true`
-              );
-              setDashboard(data);
-            })
-          }
-        >
-          Load Dashboard
-        </button>
-        {dashboard ? (
-          <div className="result">
-            <p>Situation: {dashboard.situation_id}</p>
-            <p>Generated: {dashboard.generated_at}</p>
-            <p>Articles: {dashboard.article_count}</p>
-            <p>Sources: {dashboard.source_count}</p>
-            <p>Headlines: {headline(dashboard.top_headlines)}</p>
-          </div>
-        ) : null}
-      </section>
-
-      {/* Current Data */}
-      <section className="card">
-        <h2>Current Data</h2>
-        {isAdmin && (
+        {/* ── My Situations View ──────────────────────────── */}
+        {activeView === "situations" && (
           <>
-            <p className="muted">Users</p>
-            <pre>{JSON.stringify(users, null, 2)}</pre>
+            <div className="view-header">
+              <h2>My Situations</h2>
+              <p>Track news topics and view dashboards for each situation.</p>
+            </div>
+
+            {/* Search bar */}
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div className="search-bar">
+                <IconSearch />
+                <input
+                  className="search-input"
+                  value={suggestionSearch}
+                  onChange={(e) => setSuggestionSearch(e.target.value)}
+                  placeholder="Search your feeds to discover situations..."
+                  autoComplete="off"
+                />
+                {suggestionSearch && (
+                  <button
+                    className="search-clear"
+                    onClick={() => { setSuggestionSearch(""); setSuggestions([]); setShowSuggestions(false); }}
+                    aria-label="Clear search"
+                  >
+                    &times;
+                  </button>
+                )}
+              </div>
+
+              {suggestionsLoading && (
+                <div className="search-status">
+                  <span className="spinner" />
+                  Searching your feeds...
+                </div>
+              )}
+
+              {showSuggestions && suggestions.length > 0 && (
+                <div className="headline-results">
+                  <p className="headline-results-label">
+                    {suggestions.length} situation{suggestions.length !== 1 ? "s" : ""} found
+                  </p>
+                  <div className="headline-grid">
+                    {suggestions.map((s, i) => (
+                      <button
+                        key={i}
+                        className="headline-card"
+                        onClick={() => handleSelectSuggestion(s)}
+                      >
+                        <span className="headline-card-title">{s.topic}</span>
+                        <span className="headline-card-stats">
+                          <span className="headline-stat">{s.article_count} article{s.article_count !== 1 ? "s" : ""}</span>
+                          <span className="headline-stat">{s.sources.length} source{s.sources.length !== 1 ? "s" : ""}</span>
+                        </span>
+                        <span className="headline-card-meta">
+                          {s.sources.map((src, j) => (
+                            <span key={j} className="headline-source">{src}</span>
+                          ))}
+                        </span>
+                        {s.sample_headlines.length > 1 && (
+                          <ul className="headline-samples">
+                            {s.sample_headlines.slice(0, 3).map((h, j) => (
+                              <li key={j}>{h}</li>
+                            ))}
+                          </ul>
+                        )}
+                        <span className="headline-card-action">+ Track this situation</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!showSuggestions && !suggestionsLoading && suggestionSearch.trim() && (
+                <p className="muted" style={{ textAlign: "center", padding: "12px 0", margin: 0 }}>
+                  No situations found in your feeds. Try a different search term or use manual entry below.
+                </p>
+              )}
+
+              <details className="manual-form" open={!showSuggestions || Boolean(situationTitle)}>
+                <summary className="manual-form-toggle">Manual entry</summary>
+                {isAdmin && (
+                  <label>
+                    User ID
+                    <input
+                      value={situationUserId}
+                      onChange={(e) => setSituationUserId(e.target.value)}
+                      placeholder="UUID (admin only)"
+                    />
+                  </label>
+                )}
+                <label>
+                  Title
+                  <input value={situationTitle} onChange={(e) => setSituationTitle(e.target.value)} />
+                </label>
+                <label>
+                  Query
+                  <input
+                    value={situationQuery}
+                    onChange={(e) => setSituationQuery(e.target.value)}
+                    placeholder="Search terms"
+                  />
+                </label>
+                <label>
+                  Description
+                  <textarea
+                    value={situationDescription}
+                    onChange={(e) => setSituationDescription(e.target.value)}
+                    rows={2}
+                  />
+                </label>
+                <button
+                  disabled={loading}
+                  onClick={() =>
+                    run(async () => {
+                      const created = await httpJson(`${baseUrl}/situations`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                          user_id: isAdmin && situationUserId ? situationUserId : user.id,
+                          title: situationTitle,
+                          query: situationQuery,
+                          description: situationDescription || null,
+                          is_active: true,
+                        }),
+                      });
+                      setSituations((prev) => [created, ...prev]);
+                      setSituationTitle("");
+                      setSituationQuery("");
+                      setSituationDescription("");
+                      showSuccess(`Created situation "${created.title}"`);
+                    })
+                  }
+                >
+                  Create Situation
+                </button>
+              </details>
+            </div>
+
+            {/* Situation cards */}
+            {situations.length > 0 ? (
+              <div className="situation-grid">
+                {situations.map((s) => {
+                  const isExpanded = expandedSituationId === s.id;
+                  const dash = dashboards[s.id];
+                  return (
+                    <div
+                      key={s.id}
+                      className={`situation-card${isExpanded ? " expanded" : ""}`}
+                      onClick={() => toggleSituation(s.id)}
+                    >
+                      <div className="situation-card-title">
+                        <span>{s.title}</span>
+                        <span className="expand-icon"><IconChevron /></span>
+                      </div>
+                      {s.description && (
+                        <p className="situation-card-desc">{s.description}</p>
+                      )}
+                      <span className="situation-card-query">{s.query}</span>
+
+                      {isExpanded && (
+                        <div className="situation-dashboard" onClick={(e) => e.stopPropagation()}>
+                          {dash ? (
+                            <>
+                              <div className="dashboard-stats">
+                                <div className="stat-box">
+                                  <span className="stat-number">{dash.article_count}</span>
+                                  <span className="stat-label">Articles</span>
+                                </div>
+                                <div className="stat-box">
+                                  <span className="stat-number">{dash.source_count}</span>
+                                  <span className="stat-label">Sources</span>
+                                </div>
+                              </div>
+                              {dash.top_headlines && dash.top_headlines.length > 0 ? (
+                                <ul className="dashboard-headlines">
+                                  {dash.top_headlines.map((h, i) => (
+                                    <li key={i}>{h}</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="muted" style={{ textAlign: "center", padding: "8px 0", margin: 0 }}>
+                                  No headlines yet
+                                </p>
+                              )}
+                            </>
+                          ) : (
+                            <div className="dashboard-loading">
+                              <span className="spinner" /> Loading dashboard...
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="empty-state">
+                <div className="empty-state-icon">
+                  <IconSituations />
+                </div>
+                <p><strong>No situations yet</strong></p>
+                <p>Search your feeds above to discover and track news situations.</p>
+              </div>
+            )}
           </>
         )}
-        <p className="muted">Situations</p>
-        <pre>{JSON.stringify(situations, null, 2)}</pre>
-      </section>
-    </main>
+
+        {/* ── Browse Articles View ────────────────────────── */}
+        {activeView === "articles" && (
+          <>
+            <div className="view-header">
+              <h2>Browse Articles</h2>
+              <p>Latest articles from your RSS feeds.</p>
+            </div>
+
+            <div className="card">
+              {feedArticles.length > 0 ? (
+                <>
+                  {feedArticles.map((a) => (
+                    <div key={a.id} className="feed-article-row">
+                      <a href={a.original_url} target="_blank" rel="noopener noreferrer">
+                        {a.title}
+                      </a>
+                      <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 2 }}>
+                        {a.author && <span className="muted">{a.author}</span>}
+                        {a.published_date && (
+                          <span className="muted" style={{ fontSize: 12 }}>
+                            {new Date(a.published_date).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                      {a.snippet && <p className="feed-article-snippet">{a.snippet}</p>}
+                    </div>
+                  ))}
+                  <div style={{ textAlign: "center", paddingTop: 12 }}>
+                    <button
+                      className="btn-outline btn-small"
+                      disabled={loading}
+                      onClick={() =>
+                        run(async () => {
+                          const data = await httpJson(`${baseUrl}/feed-articles?limit=30&offset=${feedArticles.length}`);
+                          if (data) setFeedArticles((prev) => [...prev, ...data]);
+                        })
+                      }
+                    >
+                      Load more
+                    </button>
+                  </div>
+                </>
+              ) : articlesLoaded ? (
+                <div className="empty-state">
+                  <p><strong>No articles yet</strong></p>
+                  <p>Articles will appear here after your RSS feeds are fetched.</p>
+                </div>
+              ) : (
+                <div className="dashboard-loading">
+                  <span className="spinner" /> Loading articles...
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ── Admin: Users View ───────────────────────────── */}
+        {activeView === "admin-users" && isAdmin && (
+          <>
+            <div className="view-header">
+              <h2>Manage Users</h2>
+              <p>Create and view user accounts.</p>
+            </div>
+
+            <div className="card" style={{ marginBottom: 16 }}>
+              <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>Create User</h3>
+              <label>
+                Email
+                <input
+                  value={userEmail}
+                  onChange={(e) => setUserEmail(e.target.value)}
+                  placeholder="user@example.com"
+                />
+              </label>
+              <label>
+                Display Name
+                <input
+                  value={userDisplayName}
+                  onChange={(e) => setUserDisplayName(e.target.value)}
+                  placeholder="User Name"
+                />
+              </label>
+              <button
+                disabled={loading}
+                onClick={() =>
+                  run(async () => {
+                    const created = await httpJson(`${baseUrl}/users`, {
+                      method: "POST",
+                      body: JSON.stringify({ email: userEmail, display_name: userDisplayName }),
+                    });
+                    setUsers((prev) => [created, ...prev]);
+                    setUserEmail("");
+                    setUserDisplayName("");
+                    showSuccess(`Created user: ${created.display_name}`);
+                  })
+                }
+              >
+                Create User
+              </button>
+            </div>
+
+            <div className="card">
+              <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>
+                All Users ({users.length})
+              </h3>
+              {users.length > 0 ? (
+                users.map((u) => (
+                  <div key={u.id} className="feed-row">
+                    <div>
+                      <strong>{u.display_name}</strong>
+                      {u.is_admin && <span className="badge" style={{ marginLeft: 8 }}>Admin</span>}
+                      <br />
+                      <span className="muted">{u.email}</span>
+                    </div>
+                    <span className="muted" style={{ fontSize: 12 }}>{u.id.slice(0, 8)}...</span>
+                  </div>
+                ))
+              ) : (
+                <div className="dashboard-loading">
+                  <span className="spinner" /> Loading users...
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ── Admin: RSS Feeds View ───────────────────────── */}
+        {activeView === "admin-feeds" && isAdmin && (
+          <>
+            <div className="view-header">
+              <h2>RSS Feeds</h2>
+              <p>Add and manage RSS feed sources.</p>
+            </div>
+
+            <div className="card" style={{ marginBottom: 16 }}>
+              <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>Add Feed</h3>
+              <label>
+                Feed Name
+                <input
+                  value={feedName}
+                  onChange={(e) => setFeedName(e.target.value)}
+                  placeholder="e.g. BBC News"
+                />
+              </label>
+              <label>
+                RSS URL
+                <input
+                  value={feedUrl}
+                  onChange={(e) => setFeedUrl(e.target.value)}
+                  placeholder="https://feeds.bbci.co.uk/news/rss.xml"
+                />
+              </label>
+              <label>
+                Category
+                <input
+                  value={feedCategory}
+                  onChange={(e) => setFeedCategory(e.target.value)}
+                  placeholder="general"
+                />
+              </label>
+              <button
+                disabled={loading}
+                onClick={() =>
+                  run(async () => {
+                    const created = await httpJson(`${baseUrl}/feed-sources`, {
+                      method: "POST",
+                      body: JSON.stringify({
+                        name: feedName,
+                        rss_url: feedUrl,
+                        category: feedCategory || "general",
+                      }),
+                    });
+                    setFeedSources((prev) => [created, ...prev]);
+                    setFeedName("");
+                    setFeedUrl("");
+                    setFeedCategory("general");
+                    showSuccess(`Added feed: ${created.name}`);
+                  })
+                }
+              >
+                Add Feed
+              </button>
+            </div>
+
+            <div className="card">
+              <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>
+                Active Feeds ({feedSources.length})
+              </h3>
+              {feedSources.length > 0 ? (
+                feedSources.map((fs) => (
+                  <div key={fs.id} className="feed-row">
+                    <div>
+                      <strong>{fs.name}</strong>
+                      <span className="badge navy" style={{ marginLeft: 8 }}>{fs.category}</span>
+                      <br />
+                      <span className="muted" style={{ fontSize: 12 }}>{fs.rss_url}</span>
+                      {fs.last_fetched_at && (
+                        <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>
+                          Last fetched: {new Date(fs.last_fetched_at).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      className="btn-danger btn-small"
+                      disabled={loading}
+                      onClick={() =>
+                        run(async () => {
+                          await httpJson(`${baseUrl}/feed-sources/${fs.id}`, { method: "DELETE" });
+                          setFeedSources((prev) => prev.filter((f) => f.id !== fs.id));
+                          showSuccess(`Removed feed: ${fs.name}`);
+                        })
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="empty-state">
+                  <p><strong>No feeds added yet</strong></p>
+                  <p>Add RSS feeds above to start collecting articles.</p>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ── Admin: Ingest Articles View ─────────────────── */}
+        {activeView === "admin-ingest" && isAdmin && (
+          <>
+            <div className="view-header">
+              <h2>Ingest Article</h2>
+              <p>Manually add an article and link it to situations.</p>
+            </div>
+
+            <div className="card">
+              <label>
+                URL
+                <input
+                  value={articleUrl}
+                  onChange={(e) => setArticleUrl(e.target.value)}
+                  placeholder="https://example.com/news/story"
+                />
+              </label>
+              <label>
+                Title
+                <input value={articleTitle} onChange={(e) => setArticleTitle(e.target.value)} />
+              </label>
+              <label>
+                Source Name
+                <input value={articleSource} onChange={(e) => setArticleSource(e.target.value)} />
+              </label>
+              <label>
+                Situation IDs (comma-separated)
+                <input
+                  value={articleSituationIds}
+                  onChange={(e) => setArticleSituationIds(e.target.value)}
+                  placeholder="uuid1, uuid2"
+                />
+              </label>
+              <button
+                disabled={loading}
+                onClick={() =>
+                  run(async () => {
+                    await httpJson(`${baseUrl}/articles/ingest`, {
+                      method: "POST",
+                      body: JSON.stringify({
+                        url: articleUrl,
+                        title: articleTitle,
+                        source_name: articleSource,
+                        source_type: "news_site",
+                        situation_ids: parseUuidCsv(articleSituationIds),
+                        metadata: {},
+                      }),
+                    });
+                    setArticleUrl("");
+                    setArticleTitle("");
+                    setArticleSource("");
+                    setArticleSituationIds("");
+                    showSuccess("Article ingested successfully");
+                  })
+                }
+              >
+                Ingest Article
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* ── Admin: System View ──────────────────────────── */}
+        {activeView === "admin-system" && isAdmin && (
+          <>
+            <div className="view-header">
+              <h2>System</h2>
+              <p>Health checks, API configuration, and raw data.</p>
+            </div>
+
+            <div className="card" style={{ marginBottom: 16 }}>
+              <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>API Configuration</h3>
+              <label>
+                API Base URL
+                <input value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
+              </label>
+              <div className="row">
+                <button
+                  disabled={loading}
+                  onClick={() =>
+                    run(async () => {
+                      const data = await httpJson(`${baseUrl}/health`);
+                      setHealth(`${data.status} (${data.service})`);
+                    })
+                  }
+                >
+                  Check Health
+                </button>
+              </div>
+              {health && <p className="ok" style={{ marginTop: 8 }}>Health: {health}</p>}
+            </div>
+
+            <div className="card" style={{ marginBottom: 16 }}>
+              <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>Users Data</h3>
+              <pre>{JSON.stringify(users, null, 2)}</pre>
+            </div>
+
+            <div className="card">
+              <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>Situations Data</h3>
+              <pre>{JSON.stringify(situations, null, 2)}</pre>
+            </div>
+          </>
+        )}
+      </main>
+    </div>
   );
 }
