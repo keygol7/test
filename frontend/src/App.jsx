@@ -208,36 +208,27 @@ export default function App() {
   }
 
   function handleSelectSuggestion(suggestion) {
-    const title = suggestion.topic;
-    const query = suggestion.query;
-    const description = suggestion.description;
-
-    setSituationTitle(title);
-    setSituationQuery(query);
-    setSituationDescription(description);
     setSuggestionSearch("");
     setSuggestions([]);
     setShowSuggestions(false);
 
-    // Auto-create the situation immediately
+    // Create the situation with its articles via the new endpoint
     run(async () => {
-      const created = await httpJson(`${baseUrl}/situations`, {
+      const created = await httpJson(`${baseUrl}/situations/from-suggestion`, {
         method: "POST",
         body: JSON.stringify({
-          user_id: isAdmin && situationUserId ? situationUserId : user.id,
-          title,
-          query,
-          description,
-          is_active: true,
+          topic: suggestion.topic,
+          query: suggestion.query,
+          description: suggestion.description,
+          articles: suggestion.articles,
         }),
       });
       setSituations((prev) => [created, ...prev]);
       setDashboardSituationId(created.id);
       setArticleSituationIds(created.id);
-      setSituationTitle("");
-      setSituationQuery("");
-      setSituationDescription("");
-      setMessage(`Created situation: ${title}`);
+      setMessage(
+        `Created situation "${created.title}" with ${suggestion.article_count} articles`
+      );
     });
   }
 

@@ -29,6 +29,7 @@ from .schemas import (
     FeedSourceCreate,
     FeedSourceRead,
     LoginRequest,
+    CreateFromSuggestion,
     SituationSuggestion,
     SituationArticleRead,
     SituationCreate,
@@ -243,6 +244,80 @@ def create_situation(
         is_active=payload.is_active,
     )
     db.add(situation)
+    db.commit()
+    db.refresh(situation)
+    return situation
+
+
+@app.post("/situations/from-suggestion", response_model=SituationRead, status_code=status.HTTP_201_CREATED)
+def create_situation_from_suggestion(
+    payload: CreateFromSuggestion,
+    db: Session = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
+) -> Situation:
+    """Create a situation and auto-ingest its discovered articles."""
+    situation = Situation(
+        user_id=current_user.id,
+        title=payload.topic,
+        description=payload.description,
+        query=payload.query,
+        is_active=True,
+    )
+    db.add(situation)
+    db.flush()
+
+    for art in payload.articles:
+        # Get or create the source
+        source = db.scalar(
+            select(Source).where(Source.name == art.source_name, Source.base_url == "")
+        )
+        if not source:
+            source = Source(name=art.source_name, base_url="", source_type="news_site")
+            db.add(source)
+            try:
+                db.flush()
+            except IntegrityError:
+                db.rollback()
+                source = db.scalar(
+                    select(Source).where(Source.name == art.source_name, Source.base_url == "")
+                )
+                if not source:
+                    continue
+
+        # Get or create the article
+        existing = db.scalar(select(Article).where(Article.url == art.url))
+        if existing:
+            article = existing
+        else:
+            article = Article(
+                source_id=source.id,
+                url=art.url,
+                title=art.title,
+                extra_metadata={},
+            )
+            db.add(article)
+            try:
+                db.flush()
+            except IntegrityError:
+                db.rollback()
+                article = db.scalar(select(Article).where(Article.url == art.url))
+                if not article:
+                    continue
+
+        # Link article to situation
+        existing_link = db.scalar(
+            select(SituationArticle).where(
+                SituationArticle.situation_id == situation.id,
+                SituationArticle.article_id == article.id,
+            )
+        )
+        if not existing_link:
+            db.add(SituationArticle(
+                situation_id=situation.id,
+                article_id=article.id,
+                reason="Auto-ingested from news suggestion",
+            ))
+
     db.commit()
     db.refresh(situation)
     return situation
@@ -694,6 +769,12 @@ def _cluster_articles(entries: list[dict]) -> list[dict]:
         entities = entry["entities"]
         keywords = entry["keywords"]
         source = entry["source"]
+        article_data = {
+            "url": entry["url"],
+            "title": title,
+            "source_name": source,
+            "published": entry.get("published"),
+        }
 
         # Find the cluster with the most entity overlap
         best_cluster = None
@@ -710,6 +791,7 @@ def _cluster_articles(entries: list[dict]) -> list[dict]:
             best_cluster["core_entities"] |= entities
             best_cluster["all_keywords"] |= keywords
             best_cluster["entity_lists"].append(entities)
+            best_cluster["articles"].append(article_data)
         else:
             clusters.append({
                 "headlines": [title],
@@ -717,6 +799,7 @@ def _cluster_articles(entries: list[dict]) -> list[dict]:
                 "core_entities": set(entities),
                 "all_keywords": set(keywords),
                 "entity_lists": [entities],
+                "articles": [article_data],
             })
 
     # Second pass: merge clusters that share entities (iterative)
@@ -734,6 +817,7 @@ def _cluster_articles(entries: list[dict]) -> list[dict]:
                     clusters[i]["core_entities"] |= clusters[j]["core_entities"]
                     clusters[i]["all_keywords"] |= clusters[j]["all_keywords"]
                     clusters[i]["entity_lists"].extend(clusters[j]["entity_lists"])
+                    clusters[i]["articles"].extend(clusters[j]["articles"])
                     clusters.pop(j)
                     merged = True
                 else:
@@ -778,9 +862,21 @@ def get_news_suggestions(
         keywords = _extract_keywords(title)
         if not entities and not keywords:
             continue
+
+        pub_struct = getattr(entry, "published_parsed", None)
+        published = None
+        if pub_struct:
+            try:
+                dt = datetime(*pub_struct[:6], tzinfo=timezone.utc)
+                published = dt.strftime("%b %d, %Y")
+            except Exception:
+                published = None
+
         entries.append({
             "title": title,
             "source": source,
+            "url": link,
+            "published": published,
             "entities": entities,
             "keywords": keywords,
         })
@@ -827,6 +923,7 @@ def get_news_suggestions(
             "article_count": len(headlines),
             "sources": sources[:6],
             "sample_headlines": headlines[:4],
+            "articles": cluster["articles"],
         })
 
     if len(_suggestions_cache) > 500:

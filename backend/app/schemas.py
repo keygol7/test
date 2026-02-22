@@ -153,6 +153,13 @@ class DashboardRead(BaseModel):
     trend_notes: str | None = None
 
 
+class SuggestionArticle(BaseModel):
+    url: str
+    title: str
+    source_name: str
+    published: str | None
+
+
 class SituationSuggestion(BaseModel):
     topic: str
     query: str
@@ -160,3 +167,11 @@ class SituationSuggestion(BaseModel):
     article_count: int
     sources: list[str]
     sample_headlines: list[str]
+    articles: list[SuggestionArticle]
+
+
+class CreateFromSuggestion(BaseModel):
+    topic: str
+    query: str
+    description: str
+    articles: list[SuggestionArticle]
