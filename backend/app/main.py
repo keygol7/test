@@ -18,6 +18,7 @@ from .auth import (
 from .config import settings
 from .database import get_db
 from .models import AppUser, Article, DashboardSnapshot, FeedArticle, FeedSource, Situation, SituationArticle, Source
+from .worker import fetch_single_feed
 
 from .schemas import (
     ArticleIngest,
@@ -570,6 +571,14 @@ def create_feed_source(
     db.add(source)
     db.commit()
     db.refresh(source)
+
+    # Immediately fetch the feed so articles are available right away
+    try:
+        fetch_single_feed(source)
+        db.refresh(source)  # pick up updated last_fetched_at
+    except Exception:
+        pass  # feed fetch failure shouldn't block creation
+
     return source
 
 
@@ -803,6 +812,41 @@ def _cluster_articles(entries: list[dict]) -> list[dict]:
             i += 1
 
     return clusters
+
+
+@app.get("/trending-topics", response_model=list[str])
+def get_trending_topics(
+    limit: int = Query(default=20, ge=1, le=50),
+    db: Session = Depends(get_db),
+    _user: AppUser = Depends(get_current_user),
+) -> list[str]:
+    """Extract trending topics from recent feed articles using entity extraction."""
+    # Get recent articles from the last 500 entries
+    stmt = (
+        select(FeedArticle.title)
+        .join(FeedSource, FeedSource.id == FeedArticle.feed_source_id)
+        .where(FeedSource.is_active.is_(True))
+        .order_by(
+            FeedArticle.published_date.desc().nullslast(),
+            FeedArticle.ingested_at.desc(),
+        )
+        .limit(500)
+    )
+    titles = db.scalars(stmt).all()
+    if not titles:
+        return []
+
+    # Count entity frequency across all recent headlines
+    entity_freq: dict[str, int] = {}
+    for title in titles:
+        entities = _extract_entities(title)
+        for e in entities:
+            entity_freq[e] = entity_freq.get(e, 0) + 1
+
+    # Return top entities (appearing in 2+ articles), title-cased
+    ranked = sorted(entity_freq.items(), key=lambda x: -x[1])
+    topics = [name.title() for name, count in ranked if count >= 2]
+    return topics[:limit]
 
 
 @app.get("/news-suggestions", response_model=list[SituationSuggestion])

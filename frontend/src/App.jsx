@@ -144,6 +144,9 @@ export default function App() {
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
+  // Trending topics for autocomplete
+  const [trendingTopics, setTrendingTopics] = useState([]);
+
   // Manual situation form
   const [situationUserId, setSituationUserId] = useState("");
   const [situationTitle, setSituationTitle] = useState("");
@@ -196,11 +199,14 @@ export default function App() {
     }
   }, [baseUrl]);
 
-  // Auto-load situations when logged in
+  // Auto-load situations and trending topics when logged in
   useEffect(() => {
     if (user) {
       httpJson(`${baseUrl}/situations`)
         .then((data) => { if (data) setSituations(data); })
+        .catch(() => {});
+      httpJson(`${baseUrl}/trending-topics?limit=30`)
+        .then((data) => { if (data) setTrendingTopics(data); })
         .catch(() => {});
     }
   }, [user, baseUrl]);
@@ -361,6 +367,7 @@ export default function App() {
   }
 
   function handleSelectSuggestion(suggestion) {
+    const topicName = suggestionSearch.trim() || suggestion.topic;
     setSuggestionSearch("");
     setSuggestions([]);
     setShowSuggestions(false);
@@ -369,7 +376,7 @@ export default function App() {
       const created = await httpJson(`${baseUrl}/situations/from-suggestion`, {
         method: "POST",
         body: JSON.stringify({
-          topic: suggestion.topic,
+          topic: topicName,
           query: suggestion.query,
           description: suggestion.description,
           articles: suggestion.articles,
@@ -561,6 +568,41 @@ export default function App() {
                   </button>
                 )}
               </div>
+
+              {/* Show trending topics when search is empty */}
+              {!suggestionSearch.trim() && trendingTopics.length > 0 && (
+                <div className="topic-autocomplete">
+                  <span className="topic-label">Trending:</span>
+                  {trendingTopics.slice(0, 10).map((topic) => (
+                    <button
+                      key={topic}
+                      className="topic-chip"
+                      onClick={() => setSuggestionSearch(topic)}
+                    >
+                      {topic}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Topic autocomplete from trending */}
+              {suggestionSearch.trim() && !showSuggestions && !suggestionsLoading && (() => {
+                const q = suggestionSearch.trim().toLowerCase();
+                const matches = trendingTopics.filter((t) => t.toLowerCase().includes(q) && t.toLowerCase() !== q);
+                return matches.length > 0 ? (
+                  <div className="topic-autocomplete">
+                    {matches.slice(0, 8).map((topic) => (
+                      <button
+                        key={topic}
+                        className="topic-chip"
+                        onClick={() => setSuggestionSearch(topic)}
+                      >
+                        {topic}
+                      </button>
+                    ))}
+                  </div>
+                ) : null;
+              })()}
 
               {suggestionsLoading && (
                 <div className="search-status">
@@ -933,7 +975,11 @@ export default function App() {
                     setFeedName("");
                     setFeedUrl("");
                     setFeedCategory("general");
-                    showSuccess(`Added feed: ${created.name}`);
+                    showSuccess(`Added feed: ${created.name}${created.last_fetched_at ? " (articles fetched)" : ""}`);
+                    // Refresh trending topics since new articles are available
+                    httpJson(`${baseUrl}/trending-topics?limit=30`)
+                      .then((data) => { if (data) setTrendingTopics(data); })
+                      .catch(() => {});
                   })
                 }
               >

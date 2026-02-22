@@ -602,6 +602,40 @@ h2 { margin: 0 0 12px; }
   color: var(--navy);
 }
 
+.topic-autocomplete {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0 4px;
+}
+
+.topic-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  align-self: center;
+}
+
+.topic-chip {
+  background: var(--orange-soft);
+  color: var(--orange);
+  border: 1px solid rgba(251, 79, 20, 0.2);
+  border-radius: 16px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.topic-chip:hover {
+  background: var(--orange);
+  color: var(--white);
+  border-color: var(--orange);
+}
+
 .search-status {
   display: flex;
   align-items: center;
