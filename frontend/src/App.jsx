@@ -202,14 +202,23 @@ export default function App() {
   // Refresh situations: call backend to find new articles, then reload situations & dashboards
   async function refreshSituations() {
     try {
-      const result = await httpJson(`${baseUrl}/situations/refresh`, { method: "POST" });
-      if (result && result.new_articles > 0) {
-        // Reload situations list and clear cached dashboards so they refresh
-        const data = await httpJson(`${baseUrl}/situations`);
-        if (data) setSituations(data);
-        setDashboards({});
-        if (expandedSituationId) loadDashboard(expandedSituationId);
-      }
+      await httpJson(`${baseUrl}/situations/refresh`, { method: "POST" });
+      // Always reload situations list so card data is current
+      const data = await httpJson(`${baseUrl}/situations`);
+      if (data) setSituations(data);
+      // Clear cached dashboards so expanded cards re-fetch fresh data
+      setDashboards((prev) => {
+        const keys = Object.keys(prev);
+        if (keys.length > 0) {
+          // Re-fetch all previously loaded dashboards
+          keys.forEach((id) => {
+            httpJson(`${baseUrl}/situations/${id}/dashboard`)
+              .then((d) => { if (d) setDashboards((p) => ({ ...p, [id]: d })); })
+              .catch(() => {});
+          });
+        }
+        return prev;
+      });
     } catch {
       // silent — don't interrupt user
     }
@@ -232,7 +241,24 @@ export default function App() {
   // Refresh situations every 60 seconds
   useEffect(() => {
     if (!user) return;
-    const interval = setInterval(refreshSituations, 60_000);
+    const interval = setInterval(async () => {
+      try {
+        await httpJson(`${baseUrl}/situations/refresh`, { method: "POST" });
+        const data = await httpJson(`${baseUrl}/situations`);
+        if (data) setSituations(data);
+        // Re-fetch any cached dashboards
+        setDashboards((prev) => {
+          Object.keys(prev).forEach((id) => {
+            httpJson(`${baseUrl}/situations/${id}/dashboard`)
+              .then((d) => { if (d) setDashboards((p) => ({ ...p, [id]: d })); })
+              .catch(() => {});
+          });
+          return prev;
+        });
+      } catch {
+        // silent
+      }
+    }, 60_000);
     return () => clearInterval(interval);
   }, [user, baseUrl]);
 
@@ -511,6 +537,11 @@ export default function App() {
           {sidebarOpen ? "\u2715" : "\u2630"}
         </button>
       </div>
+
+      {/* Sidebar overlay (mobile) */}
+      {sidebarOpen && (
+        <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
+      )}
 
       {/* Sidebar */}
       <aside className={`sidebar${sidebarOpen ? " open" : ""}`}>
