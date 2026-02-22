@@ -1023,15 +1023,7 @@ def get_news_suggestions(
         sources = sorted(cluster["sources"] - {"Unknown"})
         topic = _generate_topic_name(cluster)
 
-        # Build a query using the search term + top entities for tracking
-        top_entity_words = []
-        entity_counts: dict[str, int] = {}
-        for elist in cluster["entity_lists"]:
-            for e in elist:
-                entity_counts[e] = entity_counts.get(e, 0) + 1
-        for entity, _ in sorted(entity_counts.items(), key=lambda x: -x[1])[:3]:
-            top_entity_words.append(entity)
-        query = " ".join(top_entity_words) if top_entity_words else q.strip()
+        query = q.strip()
 
         description = (
             f"Ongoing situation with {len(headlines)} articles from "

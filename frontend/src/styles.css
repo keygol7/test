@@ -82,6 +82,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .app-layout {
   display: flex;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 /* ── Sidebar ─────────────────────────────────────────────── */
@@ -878,7 +879,7 @@ h2 { margin: 0 0 12px; }
   justify-content: space-between;
   position: sticky;
   top: 0;
-  z-index: 99;
+  z-index: 98;
 }
 
 .mobile-header h1 {
@@ -895,9 +896,10 @@ h2 { margin: 0 0 12px; }
   border: none !important;
   color: var(--white);
   font-size: 24px;
-  padding: 0;
+  padding: 4px;
   cursor: pointer;
   line-height: 1;
+  min-height: 0 !important;
 }
 
 .sidebar-overlay {
@@ -905,7 +907,12 @@ h2 { margin: 0 0 12px; }
 }
 
 @media (max-width: 768px) {
-  /* Sidebar as overlay with backdrop */
+  /* Stack layout vertically on mobile */
+  .app-layout {
+    flex-direction: column;
+  }
+
+  /* Hide sidebar off-screen by default on mobile */
   .sidebar {
     transform: translateX(-100%);
     transition: transform 0.25s ease;
@@ -917,6 +924,7 @@ h2 { margin: 0 0 12px; }
     box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
   }
 
+  /* Dark backdrop when sidebar is open */
   .sidebar-overlay {
     display: block;
     position: fixed;
@@ -925,14 +933,16 @@ h2 { margin: 0 0 12px; }
     z-index: 99;
   }
 
+  /* Show mobile header */
   .mobile-header {
     display: flex;
   }
 
-  /* Main content */
+  /* Full-width content, no sidebar margin */
   .main-content {
     margin-left: 0;
     padding: 12px;
+    width: 100%;
   }
 
   .view-header {
@@ -959,7 +969,7 @@ h2 { margin: 0 0 12px; }
   }
 
   input, textarea {
-    font-size: 16px; /* prevent iOS zoom */
+    font-size: 16px; /* prevent iOS zoom on focus */
     padding: 10px 12px;
   }
 
@@ -986,6 +996,10 @@ h2 { margin: 0 0 12px; }
 
   .situation-card-title {
     font-size: 14px;
+  }
+
+  .situation-card-desc {
+    font-size: 12px;
   }
 
   .dashboard-stats {
@@ -1038,15 +1052,28 @@ h2 { margin: 0 0 12px; }
     white-space: normal;
   }
 
-  /* Topic chips */
+  /* Topic chips — horizontal scroll on mobile */
   .topic-autocomplete {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
     gap: 6px;
-    padding: 6px 0 4px;
+    padding: 8px 0 6px;
+    scrollbar-width: none;
+  }
+
+  .topic-autocomplete::-webkit-scrollbar {
+    display: none;
+  }
+
+  .topic-label {
+    flex-shrink: 0;
   }
 
   .topic-chip {
+    flex-shrink: 0;
     font-size: 12px;
-    padding: 5px 10px;
+    padding: 6px 12px;
   }
 
   /* Feed rows */
@@ -1071,9 +1098,12 @@ h2 { margin: 0 0 12px; }
   }
 
   /* Auth */
+  .auth-wrapper {
+    padding: 16px;
+  }
+
   .auth-card {
     padding: 24px 20px;
-    margin: 0 8px;
   }
 
   .auth-card h1 {
@@ -1124,14 +1154,5 @@ h2 { margin: 0 0 12px; }
   .dashboard-stats {
     flex-direction: column;
     gap: 8px;
-  }
-
-  .topic-autocomplete {
-    gap: 4px;
-  }
-
-  .topic-chip {
-    font-size: 11px;
-    padding: 4px 8px;
   }
 }
