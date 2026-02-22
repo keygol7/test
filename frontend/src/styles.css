@@ -532,6 +532,17 @@ h2 { margin: 0 0 12px; }
   line-height: 1.4;
 }
 
+.dashboard-headlines li a {
+  color: var(--navy-text);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.dashboard-headlines li a:hover {
+  color: var(--orange);
+  text-decoration: underline;
+}
+
 .dashboard-headlines li:last-child {
   border-bottom: none;
 }

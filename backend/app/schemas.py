@@ -144,12 +144,17 @@ class FeedArticleRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class DashboardHeadline(BaseModel):
+    title: str
+    url: str
+
+
 class DashboardRead(BaseModel):
     situation_id: UUID
     generated_at: datetime
     article_count: int
     source_count: int
-    top_headlines: list[str]
+    top_headlines: list[DashboardHeadline]
     trend_notes: str | None = None
 
 

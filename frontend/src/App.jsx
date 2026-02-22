@@ -750,7 +750,11 @@ export default function App() {
                               {dash.top_headlines && dash.top_headlines.length > 0 ? (
                                 <ul className="dashboard-headlines">
                                   {dash.top_headlines.map((h, i) => (
-                                    <li key={i}>{h}</li>
+                                    <li key={i}>
+                                      <a href={h.url} target="_blank" rel="noopener noreferrer">
+                                        {h.title}
+                                      </a>
+                                    </li>
                                   ))}
                                 </ul>
                               ) : (

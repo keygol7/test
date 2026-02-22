@@ -521,14 +521,15 @@ def get_dashboard(
         .join(Article, Article.id == SituationArticle.article_id)
         .where(SituationArticle.situation_id == situation_id)
     )
-    headlines = db.scalars(
-        select(Article.title)
+    headline_rows = db.execute(
+        select(Article.title, Article.url)
         .select_from(SituationArticle)
         .join(Article, Article.id == SituationArticle.article_id)
         .where(SituationArticle.situation_id == situation_id)
         .order_by(Article.published_at.desc().nullslast(), Article.ingested_at.desc())
         .limit(5)
     ).all()
+    headlines = [{"title": title, "url": url} for title, url in headline_rows]
 
     generated_at = datetime.now(timezone.utc)
     if persist_snapshot:
@@ -536,7 +537,7 @@ def get_dashboard(
             situation_id=situation_id,
             article_count=article_count or 0,
             source_count=source_count or 0,
-            top_headlines=headlines,
+            top_headlines=[h["title"] for h in headlines],
             trend_notes=None,
         )
         db.add(snapshot)
