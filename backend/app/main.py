@@ -1,4 +1,3 @@
-import re
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -310,7 +309,7 @@ def create_situation_from_suggestion(
             db.add(SituationArticle(
                 situation_id=situation.id,
                 article_id=article.id,
-                reason="Auto-ingested from news suggestion",
+                reason="Tracked from LLM-categorized suggestion",
             ))
 
     db.commit()
@@ -735,187 +734,6 @@ def list_feed_articles(
 
 # ── Situation Suggestions (Authenticated) ─────────────────────────
 
-_STOP_WORDS = frozenset(
-    "a an the and or but in on at to for of is it by with from as be was were "
-    "are been has have had do does did will would could should may might can "
-    "not no this that these those its his her he she they we you i my your our "
-    "their who what when where how why all each every any some new says said "
-    "after over about up into out also just than more very so if than being us "
-    "vs get gets got make makes report reports could would should first last "
-    "back may might like amid amid during still another here there way according "
-    "want wants need needs take takes look looks come comes week day year "
-    "monday tuesday wednesday thursday friday saturday sunday today".split()
-)
-
-# Theme labels that map entity-keyword patterns to broad situation names.
-# These are checked first; if none match, we auto-generate from entities.
-_THEME_PATTERNS: list[tuple[set[str], str]] = [
-    ({"election", "vote", "ballot", "poll", "polls", "voting", "campaign"}, "Election"),
-    ({"protest", "protests", "protesters", "rally", "rallies", "demonstration"}, "Protests"),
-    ({"war", "military", "troops", "strike", "strikes", "attack", "invasion"}, "Military Conflict"),
-    ({"trade", "tariff", "tariffs", "sanctions", "embargo", "economy"}, "Trade & Sanctions"),
-    ({"climate", "warming", "emissions", "carbon", "environment"}, "Climate & Environment"),
-    ({"earthquake", "hurricane", "flood", "wildfire", "disaster"}, "Natural Disaster"),
-    ({"trial", "court", "lawsuit", "verdict", "judge", "indictment"}, "Legal & Courts"),
-    ({"deal", "merger", "acquisition", "ipo", "stock", "market"}, "Business & Markets"),
-    ({"championship", "tournament", "playoff", "finals", "season", "league"}, "Sports Season"),
-    ({"transfer", "signing", "roster", "draft", "trade"}, "Sports Transfers"),
-    ({"covid", "pandemic", "vaccine", "outbreak", "virus", "health"}, "Public Health"),
-    ({"summit", "talks", "diplomacy", "treaty", "negotiations"}, "Diplomacy & Talks"),
-    ({"reform", "bill", "legislation", "policy", "law"}, "Policy & Legislation"),
-    ({"tech", "ai", "artificial", "intelligence", "software", "startup"}, "Technology"),
-    ({"revolution", "uprising", "regime", "coup", "overthrow"}, "Revolution & Unrest"),
-]
-
-
-def _extract_source_name(entry) -> str:
-    src = getattr(entry, "source", None)
-    if src and isinstance(src, dict) and src.get("title"):
-        return src["title"]
-    author = getattr(entry, "author", None)
-    if author:
-        return author
-    return "Unknown"
-
-
-def _clean_title(title: str, source: str) -> str:
-    """Strip trailing ' - Source Name' suffix from Google News titles."""
-    if source and source != "Unknown":
-        suffix = f" - {source}"
-        if title.endswith(suffix):
-            return title[: -len(suffix)].strip()
-    cleaned = re.sub(r"\s+-\s+[^-]+$", "", title).strip()
-    return cleaned or title
-
-
-def _extract_entities(text: str) -> set[str]:
-    """
-    Extract named entities (proper nouns, multi-word capitalized phrases).
-    These are the primary clustering signal for broad themes.
-    """
-    # Find capitalized words/phrases (2+ chars), excluding sentence starters
-    # by looking at words that are capitalized mid-sentence or are all-caps
-    entities: set[str] = set()
-
-    # Multi-word capitalized phrases: "United States", "Premier League"
-    for match in re.finditer(r"(?<!\. )(?<!\.\n)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)", text):
-        entities.add(match.group(0).lower())
-
-    # All-caps acronyms: US, NATO, NFL, AI
-    for match in re.finditer(r"\b([A-Z]{2,6})\b", text):
-        entities.add(match.group(0).lower())
-
-    # Single capitalized words (likely proper nouns), skip very short ones
-    for match in re.finditer(r"\b([A-Z][a-z]{2,})\b", text):
-        word = match.group(0).lower()
-        if word not in _STOP_WORDS:
-            entities.add(word)
-
-    return entities
-
-
-def _extract_keywords(text: str) -> set[str]:
-    """Extract all meaningful lowercase keywords from a headline."""
-    words = re.findall(r"[A-Za-z'\u2019]{3,}", text)
-    return {w.lower() for w in words if w.lower() not in _STOP_WORDS}
-
-
-def _find_theme_label(all_keywords: set[str]) -> str | None:
-    """Check if a set of keywords matches a known broad theme pattern."""
-    for pattern_words, label in _THEME_PATTERNS:
-        if all_keywords & pattern_words:
-            return label
-    return None
-
-
-def _generate_topic_name(cluster: dict) -> str:
-    """
-    Generate a concise, broad topic name from a cluster's top entity.
-    e.g. "Iran", "Lakers", "AI Regulation"
-    """
-    entity_counts: dict[str, int] = {}
-    for entities in cluster["entity_lists"]:
-        for e in entities:
-            entity_counts[e] = entity_counts.get(e, 0) + 1
-
-    top_entities = sorted(entity_counts.items(), key=lambda x: -x[1])
-
-    # Just use the single most frequent entity as the topic name
-    if top_entities:
-        return top_entities[0][0].title()
-    return "Developing Story"
-
-
-def _cluster_articles(entries: list[dict]) -> list[dict]:
-    """
-    Group articles into broad situation clusters.
-    Uses shared entities (proper nouns) as the primary signal.
-    Any shared entity merges articles into the same cluster.
-    """
-    clusters: list[dict] = []
-
-    for entry in entries:
-        title = entry["title"]
-        entities = entry["entities"]
-        keywords = entry["keywords"]
-        source = entry["source"]
-        article_data = {
-            "url": entry["url"],
-            "title": title,
-            "source_name": source,
-            "published": entry.get("published"),
-        }
-
-        # Find the cluster with the most entity overlap
-        best_cluster = None
-        best_overlap = 0
-        for cluster in clusters:
-            overlap = len(entities & cluster["core_entities"])
-            if overlap >= 1 and overlap > best_overlap:
-                best_cluster = cluster
-                best_overlap = overlap
-
-        if best_cluster:
-            best_cluster["headlines"].append(title)
-            best_cluster["sources"].add(source)
-            best_cluster["core_entities"] |= entities
-            best_cluster["all_keywords"] |= keywords
-            best_cluster["entity_lists"].append(entities)
-            best_cluster["articles"].append(article_data)
-        else:
-            clusters.append({
-                "headlines": [title],
-                "sources": {source},
-                "core_entities": set(entities),
-                "all_keywords": set(keywords),
-                "entity_lists": [entities],
-                "articles": [article_data],
-            })
-
-    # Second pass: merge clusters that share entities (iterative)
-    merged = True
-    while merged:
-        merged = False
-        i = 0
-        while i < len(clusters):
-            j = i + 1
-            while j < len(clusters):
-                if clusters[i]["core_entities"] & clusters[j]["core_entities"]:
-                    # Merge j into i
-                    clusters[i]["headlines"].extend(clusters[j]["headlines"])
-                    clusters[i]["sources"] |= clusters[j]["sources"]
-                    clusters[i]["core_entities"] |= clusters[j]["core_entities"]
-                    clusters[i]["all_keywords"] |= clusters[j]["all_keywords"]
-                    clusters[i]["entity_lists"].extend(clusters[j]["entity_lists"])
-                    clusters[i]["articles"].extend(clusters[j]["articles"])
-                    clusters.pop(j)
-                    merged = True
-                else:
-                    j += 1
-            i += 1
-
-    return clusters
-
 
 @app.get("/trending-topics", response_model=list[str])
 def get_trending_topics(
@@ -923,33 +741,20 @@ def get_trending_topics(
     db: Session = Depends(get_db),
     _user: AppUser = Depends(get_current_user),
 ) -> list[str]:
-    """Extract trending topics from recent feed articles using entity extraction."""
-    # Get recent articles from the last 500 entries
+    """Return situation titles ranked by number of LLM-categorized articles."""
     stmt = (
-        select(FeedArticle.title)
-        .join(FeedSource, FeedSource.id == FeedArticle.feed_source_id)
-        .where(FeedSource.is_active.is_(True))
-        .order_by(
-            FeedArticle.published_date.desc().nullslast(),
-            FeedArticle.ingested_at.desc(),
+        select(Situation.title, func.count(SituationArticle.article_id).label("cnt"))
+        .join(SituationArticle, SituationArticle.situation_id == Situation.id)
+        .where(
+            Situation.is_active.is_(True),
+            SituationArticle.llm_model.isnot(None),
         )
-        .limit(500)
+        .group_by(Situation.id, Situation.title)
+        .order_by(desc("cnt"))
+        .limit(limit)
     )
-    titles = db.scalars(stmt).all()
-    if not titles:
-        return []
-
-    # Count entity frequency across all recent headlines
-    entity_freq: dict[str, int] = {}
-    for title in titles:
-        entities = _extract_entities(title)
-        for e in entities:
-            entity_freq[e] = entity_freq.get(e, 0) + 1
-
-    # Return top entities (appearing in 2+ articles), title-cased
-    ranked = sorted(entity_freq.items(), key=lambda x: -x[1])
-    topics = [name.title() for name, count in ranked if count >= 2]
-    return topics[:limit]
+    rows = db.execute(stmt).all()
+    return [row.title for row in rows]
 
 
 @app.get("/news-suggestions", response_model=list[SituationSuggestion])
@@ -958,84 +763,83 @@ def get_news_suggestions(
     db: Session = Depends(get_db),
     _user: AppUser = Depends(get_current_user),
 ) -> list[dict]:
-    normalized = q.strip().lower()
+    """Search existing LLM-categorized situations by title/description."""
+    normalized = q.strip()
     if not normalized:
         return []
 
-    # Search feed_article table using ILIKE for each keyword
-    search_words = normalized.split()
-    stmt = (
-        select(FeedArticle, FeedSource)
-        .join(FeedSource, FeedSource.id == FeedArticle.feed_source_id)
-        .where(FeedSource.is_active.is_(True))
+    # Find situations matching the query that have LLM-categorized articles
+    search_words = normalized.lower().split()
+    sit_stmt = (
+        select(
+            Situation.id,
+            Situation.title,
+            Situation.description,
+            Situation.query,
+            func.count(distinct(SituationArticle.article_id)).label("article_count"),
+        )
+        .join(SituationArticle, SituationArticle.situation_id == Situation.id)
+        .where(
+            Situation.is_active.is_(True),
+            SituationArticle.llm_model.isnot(None),
+        )
     )
+    # Match each word against situation title or description
     for word in search_words:
-        stmt = stmt.where(FeedArticle.title.ilike(f"%{word}%"))
-    stmt = stmt.order_by(
-        FeedArticle.published_date.desc().nullslast(),
-        FeedArticle.ingested_at.desc(),
-    ).limit(100)
-
-    rows = db.execute(stmt).all()
-    if not rows:
+        pattern = f"%{word}%"
+        sit_stmt = sit_stmt.where(
+            Situation.title.ilike(pattern) | Situation.description.ilike(pattern)
+        )
+    sit_stmt = (
+        sit_stmt.group_by(Situation.id, Situation.title, Situation.description, Situation.query)
+        .order_by(desc("article_count"))
+        .limit(10)
+    )
+    situation_rows = db.execute(sit_stmt).all()
+    if not situation_rows:
         return []
-
-    entries = []
-    for feed_article, feed_source in rows:
-        title = feed_article.title
-        source_name = feed_source.name
-        entities = _extract_entities(title)
-        keywords = _extract_keywords(title)
-        if not entities and not keywords:
-            continue
-
-        published = None
-        if feed_article.published_date:
-            published = feed_article.published_date.strftime("%b %d, %Y")
-
-        entries.append({
-            "title": title,
-            "source": source_name,
-            "url": feed_article.original_url,
-            "published": published,
-            "entities": entities,
-            "keywords": keywords,
-        })
-
-    if not entries:
-        return []
-
-    clusters = _cluster_articles(entries)
-
-    # Filter out tiny clusters (single-article) unless there are few results
-    big_clusters = [c for c in clusters if len(c["headlines"]) >= 2]
-    if len(big_clusters) < 2:
-        big_clusters = clusters
-
-    big_clusters.sort(key=lambda c: len(c["headlines"]), reverse=True)
 
     results = []
-    for cluster in big_clusters[:6]:
-        headlines = cluster["headlines"]
-        sources = sorted(cluster["sources"] - {"Unknown"})
-        topic = _generate_topic_name(cluster)
+    for row in situation_rows:
+        # Get sample articles and sources for this situation
+        art_stmt = (
+            select(Article.title, Article.url, Source.name.label("source_name"))
+            .join(SituationArticle, SituationArticle.article_id == Article.id)
+            .outerjoin(Source, Source.id == Article.source_id)
+            .where(
+                SituationArticle.situation_id == row.id,
+                SituationArticle.llm_model.isnot(None),
+            )
+            .order_by(SituationArticle.tagged_at.desc())
+            .limit(10)
+        )
+        art_rows = db.execute(art_stmt).all()
 
-        query = topic
+        headlines = [a.title for a in art_rows]
+        source_names = sorted({a.source_name for a in art_rows if a.source_name})
+        articles_data = [
+            {
+                "url": a.url,
+                "title": a.title,
+                "source_name": a.source_name or "Unknown",
+                "published": None,
+            }
+            for a in art_rows
+        ]
 
-        description = (
-            f"Ongoing situation with {len(headlines)} articles from "
-            f"{len(sources)} source{'s' if len(sources) != 1 else ''}. "
-            f"Key coverage: {headlines[0]}"
+        description = row.description or (
+            f"Situation with {row.article_count} articles from "
+            f"{len(source_names)} source{'s' if len(source_names) != 1 else ''}."
         )
 
         results.append({
-            "topic": topic,
-            "query": query,
+            "topic": row.title,
+            "query": row.query or row.title,
             "description": description,
-            "article_count": len(headlines),
-            "sources": sources[:6],
+            "article_count": row.article_count,
+            "sources": source_names[:6],
             "sample_headlines": headlines[:4],
-            "articles": cluster["articles"],
+            "articles": articles_data,
         })
 
     return results

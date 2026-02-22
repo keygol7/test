@@ -626,7 +626,7 @@ export default function App() {
                   className="search-input"
                   value={suggestionSearch}
                   onChange={(e) => setSuggestionSearch(e.target.value)}
-                  placeholder="Search your feeds to discover situations..."
+                  placeholder="Search situations discovered by AI..."
                   autoComplete="off"
                 />
                 {suggestionSearch && (
@@ -678,7 +678,7 @@ export default function App() {
               {suggestionsLoading && (
                 <div className="search-status">
                   <span className="spinner" />
-                  Searching your feeds...
+                  Searching situations...
                 </div>
               )}
 
@@ -720,7 +720,7 @@ export default function App() {
 
               {!showSuggestions && !suggestionsLoading && suggestionSearch.trim() && (
                 <p className="muted" style={{ textAlign: "center", padding: "12px 0", margin: 0 }}>
-                  No situations found in your feeds. Try a different search term or use manual entry below.
+                  No matching situations found. Try a different search term or use manual entry below.
                 </p>
               )}
 
