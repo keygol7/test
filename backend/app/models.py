@@ -139,6 +139,7 @@ class SituationArticle(Base):
     )
     relevance_score: Mapped[float | None] = mapped_column(Numeric(4, 3))
     reason: Mapped[str | None] = mapped_column(Text)
+    llm_model: Mapped[str | None] = mapped_column(Text)
     tagged_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -185,6 +186,7 @@ class FeedArticle(Base):
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    categorized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     feed_source: Mapped["FeedSource"] = relationship(back_populates="feed_articles")
 

@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS situation_article (
     article_id UUID NOT NULL REFERENCES article(id) ON DELETE CASCADE,
     relevance_score NUMERIC(4,3),
     reason TEXT,
+    llm_model TEXT,
     tagged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (situation_id, article_id)
 );
@@ -87,7 +88,8 @@ CREATE TABLE IF NOT EXISTS feed_article (
     author TEXT,
     published_date TIMESTAMPTZ,
     thumbnail_url TEXT,
-    ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    categorized_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_feed_article_source_id ON feed_article(feed_source_id);
@@ -99,6 +101,8 @@ CREATE INDEX IF NOT EXISTS idx_article_published_at ON article(published_at DESC
 CREATE INDEX IF NOT EXISTS idx_situation_article_article_id ON situation_article(article_id);
 CREATE INDEX IF NOT EXISTS idx_dashboard_snapshot_situation_time
     ON dashboard_snapshot(situation_id, generated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_feed_article_uncategorized
+    ON feed_article(ingested_at DESC) WHERE categorized_at IS NULL;
 
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$

@@ -37,6 +37,35 @@ services:
     ports:
       - "${BACKEND_PORT:-8000}:8000"
 
+  rss-worker:
+    image: news-dashboard-backend:latest
+    container_name: news-dashboard-rss-worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "backend.app.worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-news_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-news_dashboard}
+
+  categorizer:
+    image: news-dashboard-backend:latest
+    container_name: news-dashboard-categorizer
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "backend.app.categorizer.worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-news_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-news_dashboard}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-}
+      CATEGORIZER_ENABLED: ${CATEGORIZER_ENABLED:-true}
+      CATEGORIZER_INTERVAL_MINUTES: ${CATEGORIZER_INTERVAL_MINUTES:-5}
+      CATEGORIZER_BATCH_SIZE: ${CATEGORIZER_BATCH_SIZE:-50}
+      CATEGORIZER_RELEVANCE_THRESHOLD: ${CATEGORIZER_RELEVANCE_THRESHOLD:-0.3}
+
   frontend:
     build:
       context: .

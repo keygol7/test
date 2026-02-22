@@ -18,6 +18,15 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60
     admin_email: str = ""
 
+    # LLM Categorization settings
+    llm_provider: str = "anthropic"
+    llm_api_key: str = ""
+    llm_model: str = ""
+    categorizer_enabled: bool = False
+    categorizer_interval_minutes: int = 5
+    categorizer_batch_size: int = 50
+    categorizer_relevance_threshold: float = 0.3
+
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
         env_file_encoding="utf-8",

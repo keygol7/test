@@ -20,6 +20,7 @@ echo "=== Force-updating services to pick up new images ==="
 docker service update --force newsdash_frontend
 docker service update --force newsdash_backend
 docker service update --force newsdash_rss-worker
+docker service update --force newsdash_categorizer
 
 echo "=== Deploy complete ==="
 docker service ls --filter name=newsdash
