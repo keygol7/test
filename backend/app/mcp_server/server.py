@@ -135,6 +135,32 @@ TOOLS = [
             "required": ["feed_article_id", "reason"],
         },
     ),
+    Tool(
+        name="create_situation",
+        description=(
+            "Create a new situation (topic) discovered by the LLM from article analysis. "
+            "Owned by the admin user. Returns the new situation's UUID. "
+            "If a situation with the same title already exists, returns its ID instead."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Concise topic title (e.g. 'US-China Trade War')",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "1-2 sentence description of this news situation",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Search keywords for this topic",
+                },
+            },
+            "required": ["title", "description", "query"],
+        },
+    ),
 ]
 
 
@@ -179,6 +205,13 @@ def _dispatch(db, name: str, arguments: dict) -> object:
             db,
             feed_article_id=arguments["feed_article_id"],
             reason=arguments["reason"],
+        )
+    elif name == "create_situation":
+        return db_tools.create_situation(
+            db,
+            title=arguments["title"],
+            description=arguments["description"],
+            query=arguments["query"],
         )
     else:
         raise ValueError(f"Unknown tool: {name}")

@@ -14,6 +14,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from ..models import (
+    AppUser,
     Article,
     FeedArticle,
     FeedSource,
@@ -21,6 +22,7 @@ from ..models import (
     SituationArticle,
     Source,
 )
+from ..config import settings
 
 
 def get_uncategorized_articles(
@@ -179,3 +181,51 @@ def mark_article_uncategorizable(
     fa.categorized_at = datetime.now(timezone.utc)
     db.commit()
     return {"success": True}
+
+
+def create_situation(
+    db: Session,
+    title: str,
+    description: str,
+    query: str,
+) -> dict:
+    """Create a new situation owned by the admin user (for LLM-discovered topics)."""
+    # Find admin user by email, or fall back to first user
+    admin_user = None
+    if settings.admin_email:
+        admin_user = db.scalar(
+            select(AppUser).where(AppUser.email == settings.admin_email)
+        )
+    if admin_user is None:
+        admin_user = db.scalar(select(AppUser).order_by(AppUser.created_at.asc()))
+    if admin_user is None:
+        return {"success": False, "error": "No users in database"}
+
+    # Check for existing situation with the same title (avoid duplicates)
+    existing = db.scalar(
+        select(Situation).where(
+            func.lower(Situation.title) == title.lower(),
+            Situation.is_active.is_(True),
+        )
+    )
+    if existing:
+        return {
+            "success": True,
+            "situation_id": str(existing.id),
+            "already_existed": True,
+        }
+
+    situation = Situation(
+        user_id=admin_user.id,
+        title=title,
+        description=description,
+        query=query,
+        is_active=True,
+    )
+    db.add(situation)
+    db.commit()
+    return {
+        "success": True,
+        "situation_id": str(situation.id),
+        "already_existed": False,
+    }

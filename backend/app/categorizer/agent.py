@@ -3,6 +3,9 @@ Categorization agent — orchestrates the MCP client + LLM pipeline.
 
 Connects to the MCP server via stdio, reads uncategorized articles,
 sends batches to the LLM for categorization, and writes results back.
+
+The LLM both discovers new situations from articles AND categorizes
+articles into existing + new situations.
 """
 
 from __future__ import annotations
@@ -59,24 +62,31 @@ async def run_categorization_cycle(
     Run one full categorization cycle:
     1. Fetch all active situations
     2. Fetch uncategorized articles
-    3. Batch-send to LLM
-    4. Write results back via MCP tools
+    3. Batch-send to LLM (which discovers new situations + categorizes)
+    4. Create any new situations via MCP
+    5. Write article-situation links back via MCP tools
     """
-    stats = {"articles_processed": 0, "links_created": 0, "errors": 0, "skipped": 0}
+    stats = {
+        "articles_processed": 0,
+        "links_created": 0,
+        "errors": 0,
+        "skipped": 0,
+        "situations_created": 0,
+    }
 
-    # 1. Get situations
+    # 1. Get existing situations
     situations = await _call_tool(session, "get_all_active_situations", {})
-    if not situations:
-        log.info("No active situations — skipping categorization")
-        return stats
+    if not situations or not isinstance(situations, list):
+        situations = []
+        log.info("No existing situations — LLM will discover new ones")
+    else:
+        log.info("Found %d existing situations", len(situations))
 
-    log.info("Found %d active situations", len(situations))
-
-    # 2. Get uncategorized articles
+    # 2. Get uncategorized articles (look back 1 week)
     articles = await _call_tool(
         session,
         "get_uncategorized_articles",
-        {"limit": settings.categorizer_batch_size, "since_hours": 24},
+        {"limit": settings.categorizer_batch_size, "since_hours": 168},
     )
     if not articles or not isinstance(articles, list):
         log.info("No uncategorized articles — skipping")
@@ -102,19 +112,52 @@ async def run_categorization_cycle(
             stats["errors"] += len(batch)
             continue
 
-        # 4. Write results back
+        # 4. Create any new situations the LLM discovered
+        temp_id_to_real_id: dict[str, str] = {}
+        for ns in batch_result.new_situations:
+            try:
+                result = await _call_tool(
+                    session,
+                    "create_situation",
+                    {
+                        "title": ns.title,
+                        "description": ns.description,
+                        "query": ns.query,
+                    },
+                )
+                if result and result.get("success"):
+                    real_id = result["situation_id"]
+                    temp_id_to_real_id[ns.temp_id] = real_id
+                    if not result.get("already_existed"):
+                        stats["situations_created"] += 1
+                        log.info("Created new situation: %s (id=%s)", ns.title, real_id)
+                        # Add to situations list so subsequent batches can reference it
+                        situations.append({
+                            "id": real_id,
+                            "title": ns.title,
+                            "description": ns.description,
+                            "query": ns.query,
+                        })
+                    else:
+                        log.info("Reusing existing situation: %s (id=%s)", ns.title, real_id)
+                else:
+                    log.warning("Failed to create situation %s: %s", ns.title, result)
+            except Exception:
+                log.exception("Failed to create situation: %s", ns.title)
+
+        # 5. Write article-situation links
         for article_result in batch_result.results:
             stats["articles_processed"] += 1
-            # Filter by threshold
-            valid_matches = [
-                {
-                    "situation_id": m.situation_id,
-                    "relevance_score": m.relevance_score,
-                    "reason": m.reason,
-                }
-                for m in article_result.matches
-                if m.relevance_score >= threshold
-            ]
+            # Resolve temp IDs to real situation IDs and filter by threshold
+            valid_matches = []
+            for m in article_result.matches:
+                sit_id = temp_id_to_real_id.get(m.situation_id, m.situation_id)
+                if m.relevance_score >= threshold:
+                    valid_matches.append({
+                        "situation_id": sit_id,
+                        "relevance_score": m.relevance_score,
+                        "reason": m.reason,
+                    })
 
             try:
                 if valid_matches:
@@ -181,10 +224,11 @@ async def run_agent() -> dict:
             stats = await run_categorization_cycle(session, provider)
 
     log.info(
-        "Cycle complete: %d processed, %d links, %d skipped, %d errors",
+        "Cycle complete: %d processed, %d links, %d skipped, %d errors, %d new situations",
         stats.get("articles_processed", 0),
         stats.get("links_created", 0),
         stats.get("skipped", 0),
         stats.get("errors", 0),
+        stats.get("situations_created", 0),
     )
     return stats

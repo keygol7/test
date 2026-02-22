@@ -15,32 +15,46 @@ from dataclasses import dataclass, field
 log = logging.getLogger("categorizer.llm")
 
 CATEGORIZATION_PROMPT = """\
-You are a news article categorizer. You will be given one or more articles and a list of \
-situations (topics/queries) that users are tracking. Your job is to determine which situations \
-each article is relevant to.
+You are a news article categorizer. You will be given a batch of news articles and \
+a list of existing situations (topics) that are already being tracked. Your job is to:
 
-## Situations being tracked:
+1. Match articles to existing situations where relevant
+2. Discover NEW situations/topics from articles that don't fit existing ones
+3. Every article should be assigned to at least one situation (existing or new)
+
+## Existing situations being tracked:
 {situations_block}
 
 ## Articles to categorize:
 {articles_block}
 
 ## Instructions:
-For each article, determine which situations it matches. Consider:
-- The situation's title, description, and query keywords
-- Semantic relevance, not just keyword overlap
-- An article can match zero, one, or multiple situations
+- Group articles into coherent news situations/topics
+- Reuse an existing situation (by its ID) when an article clearly fits
+- Create NEW situations for topics not covered by existing ones
+- Give each new situation a clear, concise title (e.g. "US-China Trade War", "NBA Playoffs 2025")
+- Give each new situation a 1-2 sentence description and a search query
+- Each article MUST be assigned to at least one situation
+- An article can match multiple situations
 
 Return ONLY valid JSON with this exact structure (no markdown, no extra text):
 {{
+  "new_situations": [
+    {{
+      "temp_id": "new_1",
+      "title": "Concise Topic Title",
+      "description": "1-2 sentence description of this news situation",
+      "query": "search keywords for this topic"
+    }}
+  ],
   "results": [
     {{
       "article_id": "<feed_article_id>",
       "matches": [
         {{
-          "situation_id": "<situation uuid>",
-          "relevance_score": <float 0.0-1.0>,
-          "reason": "<1-2 sentence explanation>"
+          "situation_id": "<existing situation UUID or temp_id like new_1>",
+          "relevance_score": 0.85,
+          "reason": "1-2 sentence explanation"
         }}
       ]
     }}
@@ -54,8 +68,16 @@ Scoring guide:
 - Below 0.3: Do not include as a match
 
 Only include matches with relevance_score >= 0.3.
-If an article matches no situations, return an empty matches array for it.
+If new_situations is empty (all articles fit existing situations), return an empty array for it.
 """
+
+
+@dataclass
+class NewSituation:
+    temp_id: str
+    title: str
+    description: str
+    query: str
 
 
 @dataclass
@@ -74,16 +96,21 @@ class ArticleResult:
 @dataclass
 class BatchResult:
     results: list[ArticleResult] = field(default_factory=list)
+    new_situations: list[NewSituation] = field(default_factory=list)
 
 
 def _build_prompt(
     articles: list[dict],
     situations: list[dict],
 ) -> str:
-    situations_block = "\n".join(
-        f"- ID: {s['id']}\n  Title: {s['title']}\n  Description: {s.get('description') or 'N/A'}\n  Query: {s['query']}"
-        for s in situations
-    )
+    if situations:
+        situations_block = "\n".join(
+            f"- ID: {s['id']}\n  Title: {s['title']}\n  Description: {s.get('description') or 'N/A'}\n  Query: {s['query']}"
+            for s in situations
+        )
+    else:
+        situations_block = "(No existing situations yet — create new ones for all articles)"
+
     articles_block = "\n".join(
         f"- ID: {a['id']}\n  Title: {a['title']}\n  Snippet: {a.get('snippet') or 'N/A'}\n  URL: {a['url']}"
         for a in articles
@@ -104,6 +131,18 @@ def _parse_response(raw_text: str) -> BatchResult:
             text = text[:-3].strip()
 
     data = json.loads(text)
+
+    # Parse new situations
+    new_situations = []
+    for ns in data.get("new_situations", []):
+        new_situations.append(NewSituation(
+            temp_id=ns["temp_id"],
+            title=ns["title"],
+            description=ns.get("description", ""),
+            query=ns.get("query", ns["title"]),
+        ))
+
+    # Parse article results
     results = []
     for item in data.get("results", []):
         matches = [
@@ -115,7 +154,7 @@ def _parse_response(raw_text: str) -> BatchResult:
             for m in item.get("matches", [])
         ]
         results.append(ArticleResult(article_id=item["article_id"], matches=matches))
-    return BatchResult(results=results)
+    return BatchResult(results=results, new_situations=new_situations)
 
 
 class LLMProvider(ABC):
@@ -158,7 +197,7 @@ class AnthropicProvider(LLMProvider):
         prompt = _build_prompt(articles, situations)
         response = await self._client.messages.create(
             model=self._model,
-            max_tokens=4096,
+            max_tokens=8192,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = response.content[0].text
@@ -187,7 +226,7 @@ class OpenAIProvider(LLMProvider):
         prompt = _build_prompt(articles, situations)
         response = await self._client.chat.completions.create(
             model=self._model,
-            max_tokens=4096,
+            max_tokens=8192,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
         )
