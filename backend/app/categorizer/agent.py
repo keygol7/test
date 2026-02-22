@@ -37,7 +37,12 @@ async def _call_tool(session: ClientSession, name: str, arguments: dict) -> obje
     if not result.content:
         return None
     text = result.content[0].text
-    return json.loads(text)
+    data = json.loads(text)
+    # Check for error responses from MCP server
+    if isinstance(data, dict) and "error" in data:
+        log.error("MCP tool %s returned error: %s", name, data["error"])
+        return None
+    return data
 
 
 async def run_categorization_cycle(
@@ -66,7 +71,7 @@ async def run_categorization_cycle(
         "get_uncategorized_articles",
         {"limit": settings.categorizer_batch_size, "since_hours": 24},
     )
-    if not articles:
+    if not articles or not isinstance(articles, list):
         log.info("No uncategorized articles — skipping")
         return stats
 
