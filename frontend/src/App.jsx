@@ -137,6 +137,8 @@ export default function App() {
   const [situations, setSituations] = useState([]);
   const [expandedSituationId, setExpandedSituationId] = useState(null);
   const [dashboards, setDashboards] = useState({}); // { situationId: dashboardData }
+  const [allArticles, setAllArticles] = useState({}); // { situationId: articleList }
+  const [loadingArticles, setLoadingArticles] = useState({});
 
   // Suggestion search state
   const [suggestionSearch, setSuggestionSearch] = useState("");
@@ -354,6 +356,19 @@ export default function App() {
       if (data) setDashboards((prev) => ({ ...prev, [situationId]: data }));
     } catch {
       // silently fail
+    }
+  }
+
+  async function loadAllArticles(situationId) {
+    if (allArticles[situationId]) return;
+    setLoadingArticles((prev) => ({ ...prev, [situationId]: true }));
+    try {
+      const data = await httpJson(`${baseUrl}/situations/${situationId}/articles?limit=500`);
+      if (data) setAllArticles((prev) => ({ ...prev, [situationId]: data }));
+    } catch {
+      // silently fail
+    } finally {
+      setLoadingArticles((prev) => ({ ...prev, [situationId]: false }));
     }
   }
 
@@ -804,15 +819,58 @@ export default function App() {
                                 </div>
                               </div>
                               {dash.top_headlines && dash.top_headlines.length > 0 ? (
-                                <ul className="dashboard-headlines">
-                                  {dash.top_headlines.map((h, i) => (
-                                    <li key={i}>
-                                      <a href={h.url} target="_blank" rel="noopener noreferrer">
-                                        {h.title}
-                                      </a>
-                                    </li>
-                                  ))}
-                                </ul>
+                                <>
+                                  <ul className="dashboard-headlines">
+                                    {dash.top_headlines.map((h, i) => (
+                                      <li key={i}>
+                                        <a href={h.url} target="_blank" rel="noopener noreferrer">
+                                          {h.title}
+                                        </a>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                  {dash.article_count > dash.top_headlines.length && (
+                                    allArticles[s.id] ? (
+                                      <div className="all-articles-section">
+                                        <div className="all-articles-header">
+                                          All Articles ({allArticles[s.id].length})
+                                          <button
+                                            className="btn-secondary btn-small"
+                                            onClick={() => setAllArticles((prev) => { const { [s.id]: _, ...rest } = prev; return rest; })}
+                                          >
+                                            Collapse
+                                          </button>
+                                        </div>
+                                        <ul className="dashboard-headlines all-articles-list">
+                                          {allArticles[s.id].map((item, i) => (
+                                            <li key={i}>
+                                              <a href={item.article.url} target="_blank" rel="noopener noreferrer">
+                                                {item.article.title}
+                                              </a>
+                                              {item.article.published_at && (
+                                                <span className="article-date">
+                                                  {new Date(item.article.published_at).toLocaleDateString()}
+                                                </span>
+                                              )}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        className="btn-secondary btn-small view-all-btn"
+                                        disabled={loadingArticles[s.id]}
+                                        onClick={() => loadAllArticles(s.id)}
+                                      >
+                                        {loadingArticles[s.id] ? (
+                                          <><span className="spinner" /> Loading...</>
+                                        ) : (
+                                          `View all ${dash.article_count} articles`
+                                        )}
+                                      </button>
+                                    )
+                                  )}
+                                </>
                               ) : (
                                 <p className="muted" style={{ textAlign: "center", padding: "8px 0", margin: 0 }}>
                                   No headlines yet
