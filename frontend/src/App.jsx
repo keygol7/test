@@ -154,14 +154,17 @@ export default function App() {
   const [feedArticles, setFeedArticles] = useState([]);
   const [articlesLoaded, setArticlesLoaded] = useState(false);
 
+  // Feed sources (all users)
+  const [feedSources, setFeedSources] = useState([]);
+  const [feedsLoaded, setFeedsLoaded] = useState(false);
+  const [feedName, setFeedName] = useState("");
+  const [feedUrl, setFeedUrl] = useState("");
+  const [feedCategory, setFeedCategory] = useState("general");
+
   // Admin state
   const [users, setUsers] = useState([]);
   const [userEmail, setUserEmail] = useState("");
   const [userDisplayName, setUserDisplayName] = useState("");
-  const [feedSources, setFeedSources] = useState([]);
-  const [feedName, setFeedName] = useState("");
-  const [feedUrl, setFeedUrl] = useState("");
-  const [feedCategory, setFeedCategory] = useState("general");
   const [articleUrl, setArticleUrl] = useState("");
   const [articleTitle, setArticleTitle] = useState("");
   const [articleSource, setArticleSource] = useState("");
@@ -219,10 +222,10 @@ export default function App() {
   }, [user, isAdmin, activeView, baseUrl]);
 
   useEffect(() => {
-    if (user && isAdmin && activeView === "admin-feeds" && feedSources.length === 0) {
-      httpJson(`${baseUrl}/feed-sources`).then((data) => { if (data) setFeedSources(data); }).catch(() => {});
+    if (user && activeView === "feeds" && !feedsLoaded) {
+      httpJson(`${baseUrl}/feed-sources`).then((data) => { if (data) { setFeedSources(data); setFeedsLoaded(true); } }).catch(() => {});
     }
-  }, [user, isAdmin, activeView, baseUrl]);
+  }, [user, activeView, feedsLoaded, baseUrl]);
 
   // Debounced suggestion search
   useEffect(() => {
@@ -354,6 +357,7 @@ export default function App() {
     setFeedArticles([]);
     setArticlesLoaded(false);
     setFeedSources([]);
+    setFeedsLoaded(false);
   }
 
   function handleSelectSuggestion(suggestion) {
@@ -384,7 +388,7 @@ export default function App() {
     return (
       <div className="auth-wrapper">
         <section className="auth-card">
-          <div className="auth-logo">Broncos News Dash</div>
+          <div className="auth-logo">News Dashboard</div>
           {authView === "login" ? (
             <>
               <h1>Welcome back</h1>
@@ -470,7 +474,7 @@ export default function App() {
     <div className="app-layout">
       {/* Mobile header */}
       <div className="mobile-header">
-        <h1>Broncos News Dash</h1>
+        <h1>News Dashboard</h1>
         <button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)}>
           {sidebarOpen ? "\u2715" : "\u2630"}
         </button>
@@ -479,7 +483,7 @@ export default function App() {
       {/* Sidebar */}
       <aside className={`sidebar${sidebarOpen ? " open" : ""}`}>
         <div className="sidebar-brand">
-          <h1>Broncos News Dash</h1>
+          <h1>News Dashboard</h1>
           <p>Situation Tracker</p>
         </div>
 
@@ -497,15 +501,15 @@ export default function App() {
           <button className={`nav-item${activeView === "articles" ? " active" : ""}`} onClick={() => navigate("articles")}>
             <IconArticles /> Browse Articles
           </button>
+          <button className={`nav-item${activeView === "feeds" ? " active" : ""}`} onClick={() => navigate("feeds")}>
+            <IconFeeds /> RSS Feeds
+          </button>
 
           {isAdmin && (
             <>
               <div className="nav-section-label">Admin</div>
               <button className={`nav-item${activeView === "admin-users" ? " active" : ""}`} onClick={() => navigate("admin-users")}>
                 <IconUsers /> Users
-              </button>
-              <button className={`nav-item${activeView === "admin-feeds" ? " active" : ""}`} onClick={() => navigate("admin-feeds")}>
-                <IconFeeds /> RSS Feeds
               </button>
               <button className={`nav-item${activeView === "admin-ingest" ? " active" : ""}`} onClick={() => navigate("admin-ingest")}>
                 <IconIngest /> Ingest Articles
@@ -712,6 +716,23 @@ export default function App() {
                                   No headlines yet
                                 </p>
                               )}
+                              <button
+                                className="btn-danger btn-small"
+                                style={{ marginTop: 12 }}
+                                disabled={loading}
+                                onClick={() =>
+                                  run(async () => {
+                                    await httpJson(`${baseUrl}/situations/${s.id}`, { method: "DELETE" });
+                                    setSituations((prev) => prev.filter((sit) => sit.id !== s.id));
+                                    setExpandedSituationId(null);
+                                    const { [s.id]: _, ...rest } = dashboards;
+                                    setDashboards(rest);
+                                    showSuccess(`Deleted "${s.title}"`);
+                                  })
+                                }
+                              >
+                                Delete Situation
+                              </button>
                             </>
                           ) : (
                             <div className="dashboard-loading">
@@ -862,8 +883,8 @@ export default function App() {
           </>
         )}
 
-        {/* ── Admin: RSS Feeds View ───────────────────────── */}
-        {activeView === "admin-feeds" && isAdmin && (
+        {/* ── RSS Feeds View (all users) ─────────────────── */}
+        {activeView === "feeds" && (
           <>
             <div className="view-header">
               <h2>RSS Feeds</h2>

@@ -369,9 +369,9 @@ def update_situation(
 def delete_situation(
     situation_id: UUID,
     db: Session = Depends(get_db),
-    _admin: AppUser = Depends(require_admin),
+    current_user: AppUser = Depends(get_current_user),
 ) -> Response:
-    situation = require_situation(db, situation_id)
+    situation = require_situation_access(db, situation_id, current_user)
     db.delete(situation)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -553,14 +553,14 @@ def get_dashboard(
     )
 
 
-# ── Feed Sources (Admin only) ─────────────────────────────────
+# ── Feed Sources (Authenticated) ──────────────────────────────
 
 
 @app.post("/feed-sources", response_model=FeedSourceRead, status_code=status.HTTP_201_CREATED)
 def create_feed_source(
     payload: FeedSourceCreate,
     db: Session = Depends(get_db),
-    _admin: AppUser = Depends(require_admin),
+    _user: AppUser = Depends(get_current_user),
 ) -> FeedSource:
     existing = db.scalar(select(FeedSource).where(FeedSource.rss_url == payload.rss_url))
     if existing:
@@ -592,7 +592,7 @@ def list_feed_sources(
 def delete_feed_source(
     feed_source_id: UUID,
     db: Session = Depends(get_db),
-    _admin: AppUser = Depends(require_admin),
+    _user: AppUser = Depends(get_current_user),
 ) -> Response:
     source = db.scalar(select(FeedSource).where(FeedSource.id == feed_source_id))
     if not source:
@@ -718,36 +718,20 @@ def _find_theme_label(all_keywords: set[str]) -> str | None:
 
 def _generate_topic_name(cluster: dict) -> str:
     """
-    Generate a broad, readable topic name from a cluster's entities.
-    e.g. "Iran — Military Conflict" or "Lakers — Sports Season"
+    Generate a concise, broad topic name from a cluster's top entity.
+    e.g. "Iran", "Lakers", "AI Regulation"
     """
-    # Count entity frequency across all headlines
     entity_counts: dict[str, int] = {}
     for entities in cluster["entity_lists"]:
         for e in entities:
             entity_counts[e] = entity_counts.get(e, 0) + 1
 
-    # Sort by frequency, take top entities
     top_entities = sorted(entity_counts.items(), key=lambda x: -x[1])
 
-    # Find a theme label from the combined keywords
-    theme = _find_theme_label(cluster["all_keywords"])
-
-    # Pick the most common entity as the subject (title-case it)
-    subject_parts = []
-    for entity, _count in top_entities[:3]:
-        # Skip if it's a generic theme word already captured
-        if theme and entity in theme.lower():
-            continue
-        subject_parts.append(entity.title())
-        if len(subject_parts) >= 2:
-            break
-
-    subject = ", ".join(subject_parts) if subject_parts else "Developing Story"
-
-    if theme:
-        return f"{subject} — {theme}"
-    return subject
+    # Just use the single most frequent entity as the topic name
+    if top_entities:
+        return top_entities[0][0].title()
+    return "Developing Story"
 
 
 def _cluster_articles(entries: list[dict]) -> list[dict]:
