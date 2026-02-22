@@ -554,15 +554,37 @@ def list_feed_articles(
 
 # ── Situation Suggestions (Authenticated) ─────────────────────────
 
-# Stop-words excluded when extracting topic keywords from headlines
 _STOP_WORDS = frozenset(
     "a an the and or but in on at to for of is it by with from as be was were "
     "are been has have had do does did will would could should may might can "
     "not no this that these those its his her he she they we you i my your our "
     "their who what when where how why all each every any some new says said "
     "after over about up into out also just than more very so if than being us "
-    "vs get gets got".split()
+    "vs get gets got make makes report reports could would should first last "
+    "back may might like amid amid during still another here there way according "
+    "want wants need needs take takes look looks come comes week day year "
+    "monday tuesday wednesday thursday friday saturday sunday today".split()
 )
+
+# Theme labels that map entity-keyword patterns to broad situation names.
+# These are checked first; if none match, we auto-generate from entities.
+_THEME_PATTERNS: list[tuple[set[str], str]] = [
+    ({"election", "vote", "ballot", "poll", "polls", "voting", "campaign"}, "Election"),
+    ({"protest", "protests", "protesters", "rally", "rallies", "demonstration"}, "Protests"),
+    ({"war", "military", "troops", "strike", "strikes", "attack", "invasion"}, "Military Conflict"),
+    ({"trade", "tariff", "tariffs", "sanctions", "embargo", "economy"}, "Trade & Sanctions"),
+    ({"climate", "warming", "emissions", "carbon", "environment"}, "Climate & Environment"),
+    ({"earthquake", "hurricane", "flood", "wildfire", "disaster"}, "Natural Disaster"),
+    ({"trial", "court", "lawsuit", "verdict", "judge", "indictment"}, "Legal & Courts"),
+    ({"deal", "merger", "acquisition", "ipo", "stock", "market"}, "Business & Markets"),
+    ({"championship", "tournament", "playoff", "finals", "season", "league"}, "Sports Season"),
+    ({"transfer", "signing", "roster", "draft", "trade"}, "Sports Transfers"),
+    ({"covid", "pandemic", "vaccine", "outbreak", "virus", "health"}, "Public Health"),
+    ({"summit", "talks", "diplomacy", "treaty", "negotiations"}, "Diplomacy & Talks"),
+    ({"reform", "bill", "legislation", "policy", "law"}, "Policy & Legislation"),
+    ({"tech", "ai", "artificial", "intelligence", "software", "startup"}, "Technology"),
+    ({"revolution", "uprising", "regime", "coup", "overthrow"}, "Revolution & Unrest"),
+]
 
 
 def _extract_source_name(entry) -> str:
@@ -585,77 +607,140 @@ def _clean_title(title: str, source: str) -> str:
     return cleaned or title
 
 
+def _extract_entities(text: str) -> set[str]:
+    """
+    Extract named entities (proper nouns, multi-word capitalized phrases).
+    These are the primary clustering signal for broad themes.
+    """
+    # Find capitalized words/phrases (2+ chars), excluding sentence starters
+    # by looking at words that are capitalized mid-sentence or are all-caps
+    entities: set[str] = set()
+
+    # Multi-word capitalized phrases: "United States", "Premier League"
+    for match in re.finditer(r"(?<!\. )(?<!\.\n)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)", text):
+        entities.add(match.group(0).lower())
+
+    # All-caps acronyms: US, NATO, NFL, AI
+    for match in re.finditer(r"\b([A-Z]{2,6})\b", text):
+        entities.add(match.group(0).lower())
+
+    # Single capitalized words (likely proper nouns), skip very short ones
+    for match in re.finditer(r"\b([A-Z][a-z]{2,})\b", text):
+        word = match.group(0).lower()
+        if word not in _STOP_WORDS:
+            entities.add(word)
+
+    return entities
+
+
 def _extract_keywords(text: str) -> set[str]:
-    """Extract meaningful lowercase keywords from a headline."""
+    """Extract all meaningful lowercase keywords from a headline."""
     words = re.findall(r"[A-Za-z'\u2019]{3,}", text)
     return {w.lower() for w in words if w.lower() not in _STOP_WORDS}
 
 
+def _find_theme_label(all_keywords: set[str]) -> str | None:
+    """Check if a set of keywords matches a known broad theme pattern."""
+    for pattern_words, label in _THEME_PATTERNS:
+        if all_keywords & pattern_words:
+            return label
+    return None
+
+
+def _generate_topic_name(cluster: dict) -> str:
+    """
+    Generate a broad, readable topic name from a cluster's entities.
+    e.g. "Iran — Military Conflict" or "Lakers — Sports Season"
+    """
+    # Count entity frequency across all headlines
+    entity_counts: dict[str, int] = {}
+    for entities in cluster["entity_lists"]:
+        for e in entities:
+            entity_counts[e] = entity_counts.get(e, 0) + 1
+
+    # Sort by frequency, take top entities
+    top_entities = sorted(entity_counts.items(), key=lambda x: -x[1])
+
+    # Find a theme label from the combined keywords
+    theme = _find_theme_label(cluster["all_keywords"])
+
+    # Pick the most common entity as the subject (title-case it)
+    subject_parts = []
+    for entity, _count in top_entities[:3]:
+        # Skip if it's a generic theme word already captured
+        if theme and entity in theme.lower():
+            continue
+        subject_parts.append(entity.title())
+        if len(subject_parts) >= 2:
+            break
+
+    subject = ", ".join(subject_parts) if subject_parts else "Developing Story"
+
+    if theme:
+        return f"{subject} — {theme}"
+    return subject
+
+
 def _cluster_articles(entries: list[dict]) -> list[dict]:
     """
-    Group articles into situation clusters based on shared keywords.
-    Articles sharing 2+ keywords with a cluster's seed get grouped together.
+    Group articles into broad situation clusters.
+    Uses shared entities (proper nouns) as the primary signal.
+    Any shared entity merges articles into the same cluster.
     """
     clusters: list[dict] = []
 
     for entry in entries:
         title = entry["title"]
+        entities = entry["entities"]
         keywords = entry["keywords"]
         source = entry["source"]
 
-        # Try to find an existing cluster that shares keywords
+        # Find the cluster with the most entity overlap
         best_cluster = None
         best_overlap = 0
         for cluster in clusters:
-            overlap = len(keywords & cluster["keywords"])
-            if overlap >= 2 and overlap > best_overlap:
+            overlap = len(entities & cluster["core_entities"])
+            if overlap >= 1 and overlap > best_overlap:
                 best_cluster = cluster
                 best_overlap = overlap
 
         if best_cluster:
             best_cluster["headlines"].append(title)
             best_cluster["sources"].add(source)
-            best_cluster["keywords"] |= keywords
+            best_cluster["core_entities"] |= entities
+            best_cluster["all_keywords"] |= keywords
+            best_cluster["entity_lists"].append(entities)
         else:
             clusters.append({
-                "seed_title": title,
                 "headlines": [title],
                 "sources": {source},
-                "keywords": set(keywords),
+                "core_entities": set(entities),
+                "all_keywords": set(keywords),
+                "entity_lists": [entities],
             })
 
+    # Second pass: merge clusters that share entities (iterative)
+    merged = True
+    while merged:
+        merged = False
+        i = 0
+        while i < len(clusters):
+            j = i + 1
+            while j < len(clusters):
+                if clusters[i]["core_entities"] & clusters[j]["core_entities"]:
+                    # Merge j into i
+                    clusters[i]["headlines"].extend(clusters[j]["headlines"])
+                    clusters[i]["sources"] |= clusters[j]["sources"]
+                    clusters[i]["core_entities"] |= clusters[j]["core_entities"]
+                    clusters[i]["all_keywords"] |= clusters[j]["all_keywords"]
+                    clusters[i]["entity_lists"].extend(clusters[j]["entity_lists"])
+                    clusters.pop(j)
+                    merged = True
+                else:
+                    j += 1
+            i += 1
+
     return clusters
-
-
-def _cluster_to_suggestion(cluster: dict, search_term: str) -> dict:
-    """Convert a cluster into a SituationSuggestion response dict."""
-    headlines = cluster["headlines"]
-    sources = sorted(cluster["sources"] - {"Unknown"})
-    seed = cluster["seed_title"]
-
-    # Build a readable topic name from the seed headline (truncate if long)
-    topic = seed if len(seed) <= 80 else seed[:77] + "..."
-
-    # Build a query from the most common keywords in the cluster
-    keyword_list = sorted(cluster["keywords"] - _STOP_WORDS)
-    # Use the search term plus top cluster keywords for the query
-    query = search_term
-
-    # Build a description summarizing the situation
-    description = (
-        f"{len(headlines)} article{'s' if len(headlines) != 1 else ''} "
-        f"from {len(sources)} source{'s' if len(sources) != 1 else ''}. "
-        f"Covering: {'; '.join(headlines[:3])}"
-    )
-
-    return {
-        "topic": topic,
-        "query": query,
-        "description": description,
-        "article_count": len(headlines),
-        "sources": sources[:5],
-        "sample_headlines": headlines[:3],
-    }
 
 
 @app.get("/news-suggestions", response_model=list[SituationSuggestion])
@@ -672,7 +757,6 @@ def get_news_suggestions(
     if cached and cached[0] > now:
         return cached[1]
 
-    # Fetch a larger batch of articles so we have enough to cluster
     rss_url = (
         f"https://news.google.com/rss/search"
         f"?q={q.strip()}&hl=en-US&gl=US&ceid=US:en"
@@ -682,34 +766,68 @@ def get_news_suggestions(
     except Exception:
         raise HTTPException(status_code=502, detail="Failed to reach Google News")
 
-    # Parse all entries into a flat list
     entries = []
-    for entry in parsed.entries[:30]:
+    for entry in parsed.entries[:50]:
         title_raw = getattr(entry, "title", None)
         link = getattr(entry, "link", None)
         if not title_raw or not link:
             continue
         source = _extract_source_name(entry)
         title = _clean_title(title_raw, source)
+        entities = _extract_entities(title)
         keywords = _extract_keywords(title)
-        if not keywords:
+        if not entities and not keywords:
             continue
-        entries.append({"title": title, "source": source, "keywords": keywords})
+        entries.append({
+            "title": title,
+            "source": source,
+            "entities": entities,
+            "keywords": keywords,
+        })
 
     if not entries:
         _suggestions_cache[normalized] = (now + _SUGGESTIONS_TTL_SECONDS, [])
         return []
 
-    # Cluster articles into situations
     clusters = _cluster_articles(entries)
 
-    # Sort: largest clusters first, then convert to response format
-    clusters.sort(key=lambda c: len(c["headlines"]), reverse=True)
+    # Filter out tiny clusters (single-article) unless there are few results
+    big_clusters = [c for c in clusters if len(c["headlines"]) >= 2]
+    if len(big_clusters) < 2:
+        big_clusters = clusters
 
-    results = [
-        _cluster_to_suggestion(cluster, q.strip())
-        for cluster in clusters[:8]
-    ]
+    big_clusters.sort(key=lambda c: len(c["headlines"]), reverse=True)
+
+    results = []
+    for cluster in big_clusters[:6]:
+        headlines = cluster["headlines"]
+        sources = sorted(cluster["sources"] - {"Unknown"})
+        topic = _generate_topic_name(cluster)
+
+        # Build a query using the search term + top entities for tracking
+        top_entity_words = []
+        entity_counts: dict[str, int] = {}
+        for elist in cluster["entity_lists"]:
+            for e in elist:
+                entity_counts[e] = entity_counts.get(e, 0) + 1
+        for entity, _ in sorted(entity_counts.items(), key=lambda x: -x[1])[:3]:
+            top_entity_words.append(entity)
+        query = " ".join(top_entity_words) if top_entity_words else q.strip()
+
+        description = (
+            f"Ongoing situation with {len(headlines)} articles from "
+            f"{len(sources)} source{'s' if len(sources) != 1 else ''}. "
+            f"Key coverage: {headlines[0]}"
+        )
+
+        results.append({
+            "topic": topic,
+            "query": query,
+            "description": description,
+            "article_count": len(headlines),
+            "sources": sources[:6],
+            "sample_headlines": headlines[:4],
+        })
 
     if len(_suggestions_cache) > 500:
         _suggestions_cache.clear()
