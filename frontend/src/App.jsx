@@ -264,14 +264,14 @@ export default function App() {
     return () => clearInterval(interval);
   }, [user, baseUrl]);
 
-  // Auto-load feed articles when switching to articles view
+  // Reload feed articles whenever entering the Articles view.
   useEffect(() => {
-    if (user && activeView === "articles" && !articlesLoaded) {
+    if (user && activeView === "articles") {
       httpJson(`${baseUrl}/feed-articles?limit=30`)
         .then((data) => { if (data) { setFeedArticles(data); setArticlesLoaded(true); } })
         .catch(() => {});
     }
-  }, [user, activeView, articlesLoaded, baseUrl]);
+  }, [user, activeView, baseUrl]);
 
   // Auto-load admin data
   useEffect(() => {
@@ -1107,9 +1107,30 @@ export default function App() {
             </div>
 
             <div className="card">
-              <h3 style={{ margin: "0 0 12px", fontSize: 16 }}>
-                Active Feeds ({feedSources.length})
-              </h3>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <h3 style={{ margin: 0, fontSize: 16 }}>
+                  Active Feeds ({feedSources.length})
+                </h3>
+                <button
+                  className="btn-outline btn-small"
+                  disabled={loading}
+                  onClick={() =>
+                    run(async () => {
+                      const result = await httpJson(`${baseUrl}/feed-sources/refresh`, { method: "POST" });
+                      const refreshed = await httpJson(`${baseUrl}/feed-sources`);
+                      if (refreshed) setFeedSources(refreshed);
+                      if (result) {
+                        const errPart = result.errors ? `, ${result.errors} error${result.errors !== 1 ? "s" : ""}` : "";
+                        showSuccess(
+                          `Refreshed ${result.refreshed} feed${result.refreshed !== 1 ? "s" : ""}: ${result.new_articles} new/updated article${result.new_articles !== 1 ? "s" : ""}${errPart}`
+                        );
+                      }
+                    })
+                  }
+                >
+                  Refresh Feeds Now
+                </button>
+              </div>
               {feedSources.length > 0 ? (
                 feedSources.map((fs) => (
                   <div key={fs.id} className="feed-row">

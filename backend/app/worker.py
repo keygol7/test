@@ -1,6 +1,6 @@
 """
 RSS Feed Worker — fetches feeds every 30 minutes, stores metadata only.
-Uses ON CONFLICT DO NOTHING on original_url for deduplication.
+Uses ON CONFLICT DO UPDATE on original_url so changed feed entries are refreshed.
 """
 
 import html
@@ -13,7 +13,7 @@ from time import struct_time
 
 import feedparser
 from apscheduler.schedulers.blocking import BlockingScheduler
-from sqlalchemy import select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from .database import SessionLocal, engine
@@ -110,13 +110,34 @@ def fetch_single_feed(feed_source: FeedSource) -> int:
 
     db = SessionLocal()
     try:
-        stmt = (
-            pg_insert(FeedArticle)
-            .values(rows)
-            .on_conflict_do_nothing(index_elements=["original_url"])
+        insert_stmt = pg_insert(FeedArticle).values(rows)
+        excluded = insert_stmt.excluded
+        change_predicate = or_(
+            FeedArticle.feed_source_id.is_distinct_from(excluded.feed_source_id),
+            FeedArticle.title.is_distinct_from(excluded.title),
+            FeedArticle.snippet.is_distinct_from(excluded.snippet),
+            FeedArticle.author.is_distinct_from(excluded.author),
+            FeedArticle.published_date.is_distinct_from(excluded.published_date),
+            FeedArticle.thumbnail_url.is_distinct_from(excluded.thumbnail_url),
+        )
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=["original_url"],
+            set_={
+                "feed_source_id": excluded.feed_source_id,
+                "title": excluded.title,
+                "snippet": excluded.snippet,
+                "author": excluded.author,
+                "published_date": excluded.published_date,
+                "thumbnail_url": excluded.thumbnail_url,
+                # Treat changed rows as newly ingested so they surface in recent views.
+                "ingested_at": func.now(),
+                # Re-categorize rows whose content/metadata changed.
+                "categorized_at": None,
+            },
+            where=change_predicate,
         )
         result = db.execute(stmt)
-        new_count = result.rowcount
+        changed_count = int(result.rowcount or 0)
 
         # Update last_fetched_at
         feed_source_row = db.scalar(
@@ -126,8 +147,13 @@ def fetch_single_feed(feed_source: FeedSource) -> int:
             feed_source_row.last_fetched_at = datetime.now(timezone.utc)
 
         db.commit()
-        log.info("  %s: %d new articles (of %d entries)", feed_source.name, new_count, len(rows))
-        return new_count
+        log.info(
+            "  %s: %d inserted/updated articles (of %d entries)",
+            feed_source.name,
+            changed_count,
+            len(rows),
+        )
+        return changed_count
     except Exception:
         db.rollback()
         raise

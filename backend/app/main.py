@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -41,6 +42,7 @@ from .schemas import (
 )
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
+log = logging.getLogger("api")
 
 if settings.cors_origins:
     app.add_middleware(
@@ -730,6 +732,34 @@ def list_feed_sources(
         stmt = stmt.where(FeedSource.category == category)
     stmt = stmt.order_by(FeedSource.created_at.desc()).limit(limit).offset(offset)
     return db.scalars(stmt).all()
+
+
+@app.post("/feed-sources/refresh")
+def refresh_feed_sources(
+    db: Session = Depends(get_db),
+    _user: AppUser = Depends(get_current_user),
+) -> dict:
+    """Manually fetch all active RSS feeds immediately."""
+    sources = db.scalars(
+        select(FeedSource).where(FeedSource.is_active.is_(True))
+    ).all()
+    if not sources:
+        return {"refreshed": 0, "new_articles": 0, "errors": 0}
+
+    total_new = 0
+    errors = 0
+    for source in sources:
+        try:
+            total_new += int(fetch_single_feed(source) or 0)
+        except Exception:
+            errors += 1
+            log.exception("Manual feed refresh failed for %s (%s)", source.name, source.rss_url)
+
+    return {
+        "refreshed": len(sources),
+        "new_articles": total_new,
+        "errors": errors,
+    }
 
 
 @app.delete("/feed-sources/{feed_source_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -61,6 +61,12 @@ def _get_or_create_source(db: Session, source_name: str) -> Source:
 def _get_or_create_article_from_feed(db: Session, fa: FeedArticle, source: Source) -> Article:
     article = db.scalar(select(Article).where(Article.url == fa.original_url))
     if article is not None:
+        # Keep article metadata in sync with feed updates for existing URLs.
+        article.source_id = source.id
+        article.title = fa.title
+        article.author = fa.author
+        article.published_at = fa.published_date
+        article.summary = fa.snippet
         return article
 
     article = Article(
