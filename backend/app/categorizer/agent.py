@@ -337,6 +337,7 @@ async def _process_uncategorized_page(
 
 async def _run_backfill_progression(session: ClientSession, stats: dict) -> None:
     if not settings.categorizer_backfill_enabled:
+        log.info("Phase 3: Backfill disabled by config")
         return
 
     candidates = await _call_tool(
@@ -345,8 +346,10 @@ async def _run_backfill_progression(session: ClientSession, stats: dict) -> None
         {"limit": settings.categorizer_backfill_max_situations_per_cycle},
     )
     if not candidates or not isinstance(candidates, list):
+        log.info("Phase 3: No pending/running backfill candidates")
         return
 
+    log.info("Phase 3: Processing backfill for %d situation(s)", len(candidates))
     for candidate in candidates:
         situation_id = candidate.get("situation_id")
         if not situation_id:

@@ -206,8 +206,19 @@ def categorize_article(
     article = _get_or_create_article_from_feed(db, fa, source)
 
     links_created = 0
+    skipped_invalid_situations = 0
     for match in situation_matches:
-        sit_id = uuid.UUID(match["situation_id"])
+        try:
+            sit_id = uuid.UUID(match["situation_id"])
+        except (ValueError, TypeError, KeyError):
+            skipped_invalid_situations += 1
+            continue
+
+        situation = db.get(Situation, sit_id)
+        if situation is None:
+            skipped_invalid_situations += 1
+            continue
+
         existing = db.get(SituationArticle, (sit_id, article.id))
         if existing is None:
             db.add(
@@ -228,6 +239,7 @@ def categorize_article(
         "success": True,
         "article_id": str(article.id),
         "links_created": links_created,
+        "skipped_invalid_situations": skipped_invalid_situations,
     }
 
 
@@ -343,11 +355,25 @@ def enqueue_all_active_situation_backfills(db: Session, *, reset: bool = False) 
         else:
             failed += 1
 
+    status_rows = db.scalars(
+        select(SituationBackfillState.status)
+        .join(Situation, Situation.id == SituationBackfillState.situation_id)
+        .where(Situation.is_active.is_(True))
+    ).all()
+    status_counts = {
+        "pending": sum(1 for s in status_rows if s == "pending"),
+        "running": sum(1 for s in status_rows if s == "running"),
+        "done": sum(1 for s in status_rows if s == "done"),
+        "failed": sum(1 for s in status_rows if s == "failed"),
+    }
+
     return {
         "success": failed == 0,
         "queued": queued,
         "failed": failed,
         "total_active": len(situation_ids),
+        "status_counts": status_counts,
+        "reset": reset,
     }
 
 
