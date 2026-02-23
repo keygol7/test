@@ -136,6 +136,15 @@ def _strip_code_fences(raw_text: str) -> str:
     return "\n".join(lines).strip()
 
 
+def _preview_text_for_log(text: str | None, *, max_chars: int = 800) -> str:
+    if text is None:
+        return ""
+    compact = " ".join(text.split())
+    if len(compact) <= max_chars:
+        return compact
+    return f"{compact[:max_chars]}...(truncated, total_chars={len(compact)})"
+
+
 def _build_discovery_prompt(
     article_titles: list[dict],
     situations: list[dict],
@@ -182,10 +191,38 @@ def _build_categorization_prompt(
 
 def _parse_discovery_response(raw_text: str) -> list[NewSituation]:
     text = _strip_code_fences(raw_text)
-    data = json.loads(text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        log.warning(
+            "Discovery response JSON parse failed (%s). Returning no new situations. raw_preview=%r stripped_preview=%r",
+            exc,
+            _preview_text_for_log(raw_text),
+            _preview_text_for_log(text),
+        )
+        return []
+
+    if not isinstance(data, dict):
+        log.warning(
+            "Discovery response root is not a JSON object (got %s). Returning no new situations. stripped_preview=%r",
+            type(data).__name__,
+            _preview_text_for_log(text),
+        )
+        return []
+
+    payload = data.get("new_situations", [])
+    if not isinstance(payload, list):
+        log.warning(
+            "Discovery response has non-list new_situations (got %s). Returning no new situations. stripped_preview=%r",
+            type(payload).__name__,
+            _preview_text_for_log(text),
+        )
+        return []
 
     new_situations: list[NewSituation] = []
-    for idx, ns in enumerate(data.get("new_situations", []), start=1):
+    for idx, ns in enumerate(payload, start=1):
+        if not isinstance(ns, dict):
+            continue
         temp_id = str(ns.get("temp_id") or f"new_{idx}")
         title = str(ns.get("title") or "").strip()
         if not title:
