@@ -1,12 +1,9 @@
 """
-Categorization agent — orchestrates the MCP client + LLM pipeline.
+Categorization agent - orchestrates the MCP client + LLM pipeline.
 
-Connects to the MCP server via stdio, reads uncategorized articles,
-sends batches to the LLM for categorization, and writes results back.
-
-The LLM both discovers new situations from articles AND categorizes
-articles into existing + new situations. New situations are only created
-if 3+ articles reference them (to avoid overly specific one-off topics).
+Connects to the MCP server via stdio, runs two phases each cycle:
+1) Discover broad situations from compact article titles across the feed.
+2) Categorize uncategorized articles against existing + discovered situations.
 """
 
 from __future__ import annotations
@@ -14,31 +11,32 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
-from collections import defaultdict
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from ..config import settings
-from .llm_providers import LLMProvider, create_provider
+from .llm_providers import LLMProvider
+from .llm_providers import create_provider
 
 log = logging.getLogger("categorizer.agent")
 
-# Batch size for LLM calls (articles per prompt)
+# Batch size for LLM categorization calls (articles per prompt)
 LLM_BATCH_SIZE = 10
 
-# Minimum articles that must reference a new situation before we create it
+# Minimum validated supporting articles required to create a new situation
 MIN_ARTICLES_FOR_NEW_SITUATION = 3
 
 
-def _get_server_params() -> StdioServerParameters:
-    """Build MCP server subprocess parameters.
+def _normalize_situation_title(title: str) -> str:
+    """Normalize titles for punctuation/case/whitespace-insensitive dedupe."""
+    return re.sub(r"[^a-z0-9]+", "", (title or "").lower())
 
-    Explicitly passes the current environment so the subprocess inherits
-    DATABASE_URL and other Docker env vars (the MCP SDK may not inherit
-    them automatically in all contexts).
-    """
+
+def _get_server_params() -> StdioServerParameters:
+    """Build MCP server subprocess parameters."""
     return StdioServerParameters(
         command=sys.executable,
         args=["-m", "backend.app.mcp_server.server"],
@@ -53,110 +51,101 @@ async def _call_tool(session: ClientSession, name: str, arguments: dict) -> obje
         return None
     text = result.content[0].text
     data = json.loads(text)
-    # Check for error responses from MCP server
     if isinstance(data, dict) and "error" in data:
         log.error("MCP tool %s returned error: %s", name, data["error"])
         return None
     return data
 
 
-async def run_categorization_cycle(
-    session: ClientSession, provider: LLMProvider
-) -> dict:
-    """
-    Run one full categorization cycle:
-    1. Fetch all active situations
-    2. Fetch uncategorized articles
-    3. Batch-send to LLM (collect all results)
-    4. Filter new situations: only create those with 3+ articles
-    5. Write article-situation links back via MCP tools
-    """
-    stats = {
-        "articles_processed": 0,
-        "links_created": 0,
-        "errors": 0,
-        "skipped": 0,
-        "situations_created": 0,
-        "situations_filtered": 0,
+async def _discover_and_create_situations(
+    session: ClientSession,
+    provider: LLMProvider,
+    situations: list[dict],
+    stats: dict,
+) -> None:
+    """Phase 1: discover broad situations from compact full-feed titles."""
+    article_titles = await _call_tool(
+        session,
+        "get_all_articles_titles",
+        {
+            "limit": settings.categorizer_discovery_limit,
+            "since_hours": settings.categorizer_discovery_since_hours,
+        },
+    )
+
+    if not article_titles or not isinstance(article_titles, list):
+        log.info("Phase 1: No article titles available for discovery")
+        return
+
+    stats["discovery_articles_scanned"] = len(article_titles)
+    log.info("Phase 1: Discovering situations from %d articles", len(article_titles))
+
+    try:
+        proposed = await provider.discover_situations(article_titles, situations)
+    except Exception:
+        log.exception(
+            "Phase 1 discovery failed; continuing with Phase 2 using existing situations"
+        )
+        stats["errors"] += 1
+        return
+
+    stats["discovery_proposed"] = len(proposed)
+    if not proposed:
+        log.info("Phase 1: LLM proposed no new situations")
+        return
+
+    valid_input_ids = {
+        str(a.get("id"))
+        for a in article_titles
+        if a.get("id") is not None
+    }
+    existing_title_keys = {
+        _normalize_situation_title(str(s.get("title") or ""))
+        for s in situations
+        if s.get("title")
     }
 
-    # 1. Get existing situations
-    situations = await _call_tool(session, "get_all_active_situations", {})
-    if not situations or not isinstance(situations, list):
-        situations = []
-        log.info("No existing situations — LLM will discover new ones")
-    else:
-        log.info("Found %d existing situations", len(situations))
-
-    # 2. Get uncategorized articles (look back 1 week)
-    articles = await _call_tool(
-        session,
-        "get_uncategorized_articles",
-        {"limit": settings.categorizer_batch_size, "since_hours": 168},
-    )
-    if not articles or not isinstance(articles, list):
-        log.info("No uncategorized articles — skipping")
-        return stats
-
-    log.info("Found %d uncategorized articles to process", len(articles))
-    threshold = settings.categorizer_relevance_threshold
-
-    # 3. Process all batches and collect results before creating anything
-    # We need to aggregate across batches to count articles per new situation
-    all_batch_results = []  # list of (batch_result, batch_index)
-    # Track proposed new situations and which articles reference them
-    # Key: temp_id -> {info: NewSituation, article_ids: set}
-    proposed_situations: dict[str, dict] = {}
-
-    for i in range(0, len(articles), LLM_BATCH_SIZE):
-        batch = articles[i : i + LLM_BATCH_SIZE]
-        log.info(
-            "Processing batch %d/%d (%d articles)",
-            i // LLM_BATCH_SIZE + 1,
-            (len(articles) + LLM_BATCH_SIZE - 1) // LLM_BATCH_SIZE,
-            len(batch),
-        )
-
-        try:
-            batch_result = await provider.categorize_batch(batch, situations)
-        except Exception:
-            log.exception("LLM call failed for batch starting at index %d", i)
-            stats["errors"] += len(batch)
+    # Aggregate by normalized title so equivalent titles merge support IDs.
+    aggregated: dict[str, dict] = {}
+    for ns in proposed:
+        key = _normalize_situation_title(ns.title)
+        if not key:
+            stats["situations_filtered"] += 1
             continue
 
-        all_batch_results.append(batch_result)
+        if key in existing_title_keys:
+            stats["situations_filtered"] += 1
+            continue
 
-        # Collect new situation proposals and count referencing articles
-        for ns in batch_result.new_situations:
-            if ns.temp_id not in proposed_situations:
-                proposed_situations[ns.temp_id] = {
-                    "info": ns,
-                    "article_ids": set(),
-                }
+        supporting_ids = {
+            article_id.strip()
+            for article_id in ns.supporting_article_ids
+            if article_id and article_id.strip() in valid_input_ids
+        }
 
-        for article_result in batch_result.results:
-            for m in article_result.matches:
-                if m.situation_id in proposed_situations and m.relevance_score >= threshold:
-                    proposed_situations[m.situation_id]["article_ids"].add(
-                        article_result.article_id
-                    )
+        if key not in aggregated:
+            aggregated[key] = {
+                "info": ns,
+                "article_ids": set(),
+            }
 
-    # 4. Create only new situations that have 3+ articles referencing them
-    temp_id_to_real_id: dict[str, str] = {}
-    filtered_temp_ids: set[str] = set()
+        aggregated[key]["article_ids"].update(supporting_ids)
 
-    for temp_id, data in proposed_situations.items():
+    for key, data in sorted(
+        aggregated.items(),
+        key=lambda item: len(item[1]["article_ids"]),
+        reverse=True,
+    ):
         article_count = len(data["article_ids"])
         ns = data["info"]
 
         if article_count < MIN_ARTICLES_FOR_NEW_SITUATION:
             log.info(
-                "Filtering out proposed situation '%s' — only %d articles (need %d+)",
+                "Phase 1: Filtering discovered situation '%s' - %d validated supporting articles (need %d)",
                 ns.title,
                 article_count,
                 MIN_ARTICLES_FOR_NEW_SITUATION,
             )
-            filtered_temp_ids.add(temp_id)
             stats["situations_filtered"] += 1
             continue
 
@@ -171,50 +160,142 @@ async def run_categorization_cycle(
                 },
             )
             if result and result.get("success"):
-                real_id = result["situation_id"]
-                temp_id_to_real_id[temp_id] = real_id
+                situation_id = str(result["situation_id"])
                 if not result.get("already_existed"):
                     stats["situations_created"] += 1
                     log.info(
-                        "Created new situation: %s (id=%s, %d articles)",
+                        "Phase 1: Created situation '%s' (id=%s, %d supporting articles)",
                         ns.title,
-                        real_id,
+                        situation_id,
                         article_count,
                     )
-                    situations.append({
-                        "id": real_id,
-                        "title": ns.title,
-                        "description": ns.description,
-                        "query": ns.query,
-                    })
                 else:
                     log.info(
-                        "Reusing existing situation: %s (id=%s)",
+                        "Phase 1: Reused existing situation '%s' (id=%s)",
                         ns.title,
-                        real_id,
+                        situation_id,
                     )
-            else:
-                log.warning("Failed to create situation %s: %s", ns.title, result)
-        except Exception:
-            log.exception("Failed to create situation: %s", ns.title)
 
-    # 5. Write article-situation links for all batches
-    for batch_result in all_batch_results:
-        for article_result in batch_result.results:
+                if not any(str(s.get("id")) == situation_id for s in situations):
+                    situations.append(
+                        {
+                            "id": situation_id,
+                            "title": ns.title,
+                            "description": ns.description,
+                            "query": ns.query,
+                        }
+                    )
+                existing_title_keys.add(key)
+            else:
+                log.warning("Failed to create discovered situation %s: %s", ns.title, result)
+                stats["errors"] += 1
+        except Exception:
+            log.exception("Failed to create discovered situation: %s", ns.title)
+            stats["errors"] += 1
+
+
+async def run_categorization_cycle(
+    session: ClientSession,
+    provider: LLMProvider,
+) -> dict:
+    """Run one full two-phase categorization cycle."""
+    stats = {
+        "articles_processed": 0,
+        "links_created": 0,
+        "errors": 0,
+        "skipped": 0,
+        "situations_created": 0,
+        "situations_filtered": 0,
+        "discovery_articles_scanned": 0,
+        "discovery_proposed": 0,
+    }
+
+    # Load all currently active situations first.
+    situations = await _call_tool(session, "get_all_active_situations", {})
+    if not situations or not isinstance(situations, list):
+        situations = []
+        log.info("No existing situations found")
+    else:
+        log.info("Found %d existing situations", len(situations))
+
+    # Phase 1: discover new situations from the broader feed context.
+    await _discover_and_create_situations(session, provider, situations, stats)
+
+    # Phase 2: categorize only uncategorized articles against all situations.
+    articles = await _call_tool(
+        session,
+        "get_uncategorized_articles",
+        {
+            "limit": settings.categorizer_batch_size,
+            "since_hours": 168,
+        },
+    )
+    if not articles or not isinstance(articles, list):
+        log.info("Phase 2: No uncategorized articles - skipping")
+        return stats
+
+    log.info("Phase 2: Found %d uncategorized articles to process", len(articles))
+    threshold = settings.categorizer_relevance_threshold
+    valid_situation_ids = {
+        str(s.get("id"))
+        for s in situations
+        if s.get("id") is not None
+    }
+    if not valid_situation_ids:
+        log.warning(
+            "Phase 2: No situations available for matching; leaving uncategorized articles for retry"
+        )
+        return stats
+
+    for i in range(0, len(articles), LLM_BATCH_SIZE):
+        batch = articles[i:i + LLM_BATCH_SIZE]
+        batch_index = i // LLM_BATCH_SIZE + 1
+        total_batches = (len(articles) + LLM_BATCH_SIZE - 1) // LLM_BATCH_SIZE
+        log.info("Phase 2: Processing batch %d/%d (%d articles)", batch_index, total_batches, len(batch))
+
+        try:
+            batch_result = await provider.categorize_batch(batch, situations)
+        except Exception:
+            log.exception("LLM categorization failed for batch starting at index %d", i)
+            stats["errors"] += len(batch)
+            continue
+
+        if batch_result.new_situations:
+            log.warning(
+                "Phase 2: LLM returned %d unexpected new_situations; ignoring them",
+                len(batch_result.new_situations),
+            )
+
+        result_by_article_id = {
+            result.article_id: result
+            for result in batch_result.results
+        }
+
+        for article in batch:
+            article_id = str(article["id"])
+            article_result = result_by_article_id.get(article_id)
+            if article_result is None:
+                log.warning(
+                    "Phase 2: LLM omitted article %s; leaving it uncategorized for retry",
+                    article_id,
+                )
+                stats["errors"] += 1
+                continue
+
             stats["articles_processed"] += 1
-            # Resolve temp IDs and filter by threshold + filtered situations
             valid_matches = []
-            for m in article_result.matches:
-                # Skip matches to situations that were filtered out (< 3 articles)
-                if m.situation_id in filtered_temp_ids:
+            for match in article_result.matches:
+                if match.relevance_score < threshold:
                     continue
-                sit_id = temp_id_to_real_id.get(m.situation_id, m.situation_id)
-                if m.relevance_score >= threshold:
-                    valid_matches.append({
-                        "situation_id": sit_id,
-                        "relevance_score": m.relevance_score,
-                        "reason": m.reason,
-                    })
+                if match.situation_id not in valid_situation_ids:
+                    continue
+                valid_matches.append(
+                    {
+                        "situation_id": match.situation_id,
+                        "relevance_score": match.relevance_score,
+                        "reason": match.reason,
+                    }
+                )
 
             try:
                 if valid_matches:
@@ -222,7 +303,7 @@ async def run_categorization_cycle(
                         session,
                         "categorize_article",
                         {
-                            "feed_article_id": article_result.article_id,
+                            "feed_article_id": article_id,
                             "situation_matches": valid_matches,
                             "llm_model": provider.model_name,
                         },
@@ -230,39 +311,29 @@ async def run_categorization_cycle(
                     if result and result.get("success"):
                         stats["links_created"] += result.get("links_created", 0)
                     else:
-                        log.warning(
-                            "categorize_article failed for %s: %s",
-                            article_result.article_id,
-                            result,
-                        )
+                        log.warning("categorize_article failed for %s: %s", article_id, result)
                         stats["errors"] += 1
                 else:
                     await _call_tool(
                         session,
                         "mark_article_uncategorizable",
                         {
-                            "feed_article_id": article_result.article_id,
-                            "reason": "No situations matched above threshold",
+                            "feed_article_id": article_id,
+                            "reason": "No existing situations matched above threshold",
                         },
                     )
                     stats["skipped"] += 1
             except Exception:
-                log.exception(
-                    "Failed to write result for article %s",
-                    article_result.article_id,
-                )
+                log.exception("Failed to write result for article %s", article_id)
                 stats["errors"] += 1
 
     return stats
 
 
 async def run_agent() -> dict:
-    """
-    Entry point: spawn MCP server, connect, run one categorization cycle.
-    Returns stats dict.
-    """
+    """Entry point: spawn MCP server, connect, run one categorization cycle."""
     if not settings.llm_api_key:
-        log.error("LLM_API_KEY not configured — cannot run categorization")
+        log.error("LLM_API_KEY not configured - cannot run categorization")
         return {"error": "LLM_API_KEY not configured"}
 
     provider = create_provider(
@@ -281,12 +352,14 @@ async def run_agent() -> dict:
             stats = await run_categorization_cycle(session, provider)
 
     log.info(
-        "Cycle complete: %d processed, %d links, %d skipped, %d errors, %d new situations, %d filtered",
+        "Cycle complete: %d processed, %d links, %d skipped, %d errors, %d new situations, %d filtered, %d discovery titles, %d proposed",
         stats.get("articles_processed", 0),
         stats.get("links_created", 0),
         stats.get("skipped", 0),
         stats.get("errors", 0),
         stats.get("situations_created", 0),
         stats.get("situations_filtered", 0),
+        stats.get("discovery_articles_scanned", 0),
+        stats.get("discovery_proposed", 0),
     )
     return stats

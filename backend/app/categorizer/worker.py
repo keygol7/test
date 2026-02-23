@@ -48,11 +48,16 @@ def run_categorization():
 
 def main():
     log.info("=== Categorization Worker starting ===")
-    log.info("Provider: %s | Interval: %d min | Batch size: %d | Threshold: %.2f",
-             settings.llm_provider,
-             settings.categorizer_interval_minutes,
-             settings.categorizer_batch_size,
-             settings.categorizer_relevance_threshold)
+    log.info(
+        "Provider: %s | Interval: %d min | Batch size: %d | Threshold: %.2f | "
+        "Discovery limit: %d | Discovery window: %d hours",
+        settings.llm_provider,
+        settings.categorizer_interval_minutes,
+        settings.categorizer_batch_size,
+        settings.categorizer_relevance_threshold,
+        settings.categorizer_discovery_limit,
+        settings.categorizer_discovery_since_hours,
+    )
 
     # Verify database connectivity
     try:

@@ -7,6 +7,7 @@ testable independently of the MCP transport layer.
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -23,6 +24,11 @@ from ..models import (
     Source,
 )
 from ..config import settings
+
+
+def normalize_situation_title(title: str) -> str:
+    """Normalize a title for dedupe checks (case/punctuation/whitespace-insensitive)."""
+    return re.sub(r"[^a-z0-9]+", "", (title or "").lower())
 
 
 def get_uncategorized_articles(
@@ -64,6 +70,27 @@ def get_uncategorized_articles(
         }
         for row in rows
     ]
+
+
+def get_all_articles_titles(
+    db: Session,
+    *,
+    limit: int = 1000,
+    since_hours: int = 336,
+) -> list[dict]:
+    """Fetch compact article IDs + titles from active feeds for situation discovery."""
+    stmt = (
+        select(FeedArticle.id, FeedArticle.title)
+        .join(FeedSource, FeedArticle.feed_source_id == FeedSource.id)
+        .where(FeedSource.is_active.is_(True))
+    )
+    if since_hours > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+        stmt = stmt.where(FeedArticle.ingested_at >= cutoff)
+
+    stmt = stmt.order_by(FeedArticle.ingested_at.desc()).limit(limit)
+    rows = db.execute(stmt).all()
+    return [{"id": str(row.id), "title": row.title} for row in rows]
 
 
 def get_all_active_situations(db: Session) -> list[dict]:
@@ -190,6 +217,14 @@ def create_situation(
     query: str,
 ) -> dict:
     """Create a new situation owned by the admin user (for LLM-discovered topics)."""
+    clean_title = title.strip()
+    if not clean_title:
+        return {"success": False, "error": "Title cannot be empty"}
+
+    normalized_title = normalize_situation_title(clean_title)
+    if not normalized_title:
+        return {"success": False, "error": "Title cannot be empty"}
+
     # Find admin user by email, or fall back to first user
     admin_user = None
     if settings.admin_email:
@@ -201,11 +236,16 @@ def create_situation(
     if admin_user is None:
         return {"success": False, "error": "No users in database"}
 
-    # Check for existing situation with the same title (avoid duplicates)
+    # Check for existing situation with normalized-equivalent title (avoid duplicates)
     existing = db.scalar(
         select(Situation).where(
-            func.lower(Situation.title) == title.lower(),
             Situation.is_active.is_(True),
+            func.regexp_replace(
+                func.lower(Situation.title),
+                r"[^a-z0-9]+",
+                "",
+                "g",
+            ) == normalized_title,
         )
     )
     if existing:
@@ -217,7 +257,7 @@ def create_situation(
 
     situation = Situation(
         user_id=admin_user.id,
-        title=title,
+        title=clean_title,
         description=description,
         query=query,
         is_active=True,

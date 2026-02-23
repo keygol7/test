@@ -54,6 +54,28 @@ TOOLS = [
         },
     ),
     Tool(
+        name="get_all_articles_titles",
+        description=(
+            "Fetch compact feed article IDs + titles from active feeds for "
+            "situation discovery over a bounded time window."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Max article titles to return (default 1000)",
+                    "default": 1000,
+                },
+                "since_hours": {
+                    "type": "integer",
+                    "description": "Only titles ingested within this many hours (default 336)",
+                    "default": 336,
+                },
+            },
+        },
+    ),
+    Tool(
         name="get_all_active_situations",
         description=(
             "Return all active situations (topics/queries) across all users. "
@@ -188,6 +210,12 @@ def _dispatch(db, name: str, arguments: dict) -> object:
             db,
             limit=arguments.get("limit", 50),
             since_hours=arguments.get("since_hours", 24),
+        )
+    elif name == "get_all_articles_titles":
+        return db_tools.get_all_articles_titles(
+            db,
+            limit=arguments.get("limit", 1000),
+            since_hours=arguments.get("since_hours", 336),
         )
     elif name == "get_all_active_situations":
         return db_tools.get_all_active_situations(db)

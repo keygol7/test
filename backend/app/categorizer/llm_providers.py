@@ -1,5 +1,5 @@
 """
-LLM provider abstraction for article categorization.
+LLM provider abstraction for situation discovery and article categorization.
 
 Supports Anthropic (Claude) and OpenAI with a common interface.
 Provider selected via LLM_PROVIDER config setting.
@@ -14,52 +14,77 @@ from dataclasses import dataclass, field
 
 log = logging.getLogger("categorizer.llm")
 
-CATEGORIZATION_PROMPT = """\
-You are a news article categorizer. You will be given a batch of news articles and \
-a list of existing situations (topics) that are already being tracked. Your job is to:
+SITUATION_DISCOVERY_PROMPT = """\
+You are a news situation discovery assistant. You will receive:
+1) A list of existing situations already being tracked.
+2) A compact list of article titles (ID + title only).
 
-1. Match articles to existing situations where relevant
-2. Discover NEW broad situations/topics from articles that don't fit existing ones
-3. Every article should be assigned to at least one situation (existing or new)
+Your job is to propose only NEW broad situations that are not already covered.
 
-## Existing situations being tracked:
+Existing situations:
 {situations_block}
 
-## Articles to categorize:
-{articles_block}
+Article titles:
+{article_titles_block}
 
-## CRITICAL Instructions for creating NEW situations:
-- Situations must be BROAD topics, not narrow subtopics
-- GOOD examples: "Winter Olympics 2026", "US Immigration Policy", "AI Industry", "Middle East Conflict"
-- BAD examples: "Olympic Speed Skating Medal Results", "H-1B Visa Processing Delays", "OpenAI Board Drama"
-- Think of situations as ongoing news THEMES that will have many articles over days/weeks
-- If multiple articles cover different angles of the same broad topic, group them under ONE broad situation
-- Only propose a new situation if you believe multiple articles in this batch relate to it
-- When in doubt, make the situation BROADER rather than narrower
+Rules:
+- Propose BROAD ongoing topics, not narrow one-off story angles.
+- Reuse existing situations conceptually; do not duplicate them.
+- Only propose a situation if multiple titles clearly support it.
+- For each proposed situation, include supporting_article_ids using ONLY IDs from the provided list.
+- supporting_article_ids must be specific and should usually include at least 3 article IDs.
 
-## General instructions:
-- Reuse an existing situation (by its ID) when an article clearly fits
-- Give each new situation a clear, concise title (2-4 words preferred)
-- Give each new situation a 1-2 sentence description and a search query
-- Each article MUST be assigned to at least one situation
-- An article can match multiple situations
-
-Return ONLY valid JSON with this exact structure (no markdown, no extra text):
+Return ONLY valid JSON (no markdown) in this exact structure:
 {{
   "new_situations": [
     {{
       "temp_id": "new_1",
       "title": "Broad Topic Title",
-      "description": "1-2 sentence description of this news situation",
-      "query": "search keywords for this topic"
+      "description": "1-2 sentence description",
+      "query": "search keywords",
+      "supporting_article_ids": ["<article_id_1>", "<article_id_2>", "<article_id_3>"]
     }}
-  ],
+  ]
+}}
+
+If no new situations should be created, return:
+{{"new_situations": []}}
+"""
+
+CATEGORIZATION_MATCH_PROMPT = """\
+You are a news article categorizer. You will be given:
+1) A batch of articles.
+2) A list of existing situations (topics) already being tracked.
+
+Your job is only to match each article to relevant EXISTING situations by ID.
+
+Existing situations:
+{situations_block}
+
+Articles to categorize:
+{articles_block}
+
+Rules:
+- Do NOT propose or invent new situations.
+- Use only situation IDs from the existing situations list.
+- Each article can match multiple situations.
+- If an article does not match any existing situation, return an empty matches array for that article.
+- Only include matches with relevance_score >= 0.3.
+
+Scoring guide:
+- 0.9-1.0: directly about this situation
+- 0.6-0.8: closely related
+- 0.3-0.5: tangentially related
+- below 0.3: do not include
+
+Return ONLY valid JSON (no markdown) in this exact structure:
+{{
   "results": [
     {{
       "article_id": "<feed_article_id>",
       "matches": [
         {{
-          "situation_id": "<existing situation UUID or temp_id like new_1>",
+          "situation_id": "<existing situation UUID>",
           "relevance_score": 0.85,
           "reason": "1-2 sentence explanation"
         }}
@@ -67,15 +92,6 @@ Return ONLY valid JSON with this exact structure (no markdown, no extra text):
     }}
   ]
 }}
-
-Scoring guide:
-- 0.9-1.0: Article is directly about this situation/topic
-- 0.6-0.8: Article is closely related or has significant overlap
-- 0.3-0.5: Article is tangentially related
-- Below 0.3: Do not include as a match
-
-Only include matches with relevance_score >= 0.3.
-If new_situations is empty (all articles fit existing situations), return an empty array for it.
 """
 
 
@@ -85,6 +101,7 @@ class NewSituation:
     title: str
     description: str
     query: str
+    supporting_article_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -103,10 +120,45 @@ class ArticleResult:
 @dataclass
 class BatchResult:
     results: list[ArticleResult] = field(default_factory=list)
+    # Kept for robustness in case a model still emits this key unexpectedly.
     new_situations: list[NewSituation] = field(default_factory=list)
 
 
-def _build_prompt(
+def _strip_code_fences(raw_text: str) -> str:
+    text = raw_text.strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if lines:
+        lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _build_discovery_prompt(
+    article_titles: list[dict],
+    situations: list[dict],
+) -> str:
+    if situations:
+        situations_block = "\n".join(
+            f"- ID: {s['id']}\n  Title: {s['title']}\n  Description: {s.get('description') or 'N/A'}"
+            for s in situations
+        )
+    else:
+        situations_block = "(No existing situations currently tracked)"
+
+    article_titles_block = "\n".join(
+        f"- ID: {a['id']}\n  Title: {a.get('title') or 'N/A'}"
+        for a in article_titles
+    )
+    return SITUATION_DISCOVERY_PROMPT.format(
+        situations_block=situations_block,
+        article_titles_block=article_titles_block,
+    )
+
+
+def _build_categorization_prompt(
     articles: list[dict],
     situations: list[dict],
 ) -> str:
@@ -116,51 +168,85 @@ def _build_prompt(
             for s in situations
         )
     else:
-        situations_block = "(No existing situations yet — create new ones for all articles)"
+        situations_block = "(No existing situations. Return empty matches for every article.)"
 
     articles_block = "\n".join(
         f"- ID: {a['id']}\n  Title: {a['title']}\n  Snippet: {a.get('snippet') or 'N/A'}\n  URL: {a['url']}"
         for a in articles
     )
-    return CATEGORIZATION_PROMPT.format(
+    return CATEGORIZATION_MATCH_PROMPT.format(
         situations_block=situations_block,
         articles_block=articles_block,
     )
 
 
-def _parse_response(raw_text: str) -> BatchResult:
-    """Parse LLM JSON response into BatchResult."""
-    text = raw_text.strip()
-    # Strip markdown code fences if present
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        if text.endswith("```"):
-            text = text[:-3].strip()
-
+def _parse_discovery_response(raw_text: str) -> list[NewSituation]:
+    text = _strip_code_fences(raw_text)
     data = json.loads(text)
 
-    # Parse new situations
-    new_situations = []
-    for ns in data.get("new_situations", []):
-        new_situations.append(NewSituation(
-            temp_id=ns["temp_id"],
-            title=ns["title"],
-            description=ns.get("description", ""),
-            query=ns.get("query", ns["title"]),
-        ))
+    new_situations: list[NewSituation] = []
+    for idx, ns in enumerate(data.get("new_situations", []), start=1):
+        temp_id = str(ns.get("temp_id") or f"new_{idx}")
+        title = str(ns.get("title") or "").strip()
+        if not title:
+            continue
+        description = str(ns.get("description") or "").strip()
+        query = str(ns.get("query") or title).strip()
+        supporting_article_ids = [
+            str(article_id).strip()
+            for article_id in ns.get("supporting_article_ids", [])
+            if str(article_id).strip()
+        ]
+        new_situations.append(
+            NewSituation(
+                temp_id=temp_id,
+                title=title,
+                description=description,
+                query=query,
+                supporting_article_ids=supporting_article_ids,
+            )
+        )
+    return new_situations
 
-    # Parse article results
-    results = []
+
+def _parse_categorization_response(raw_text: str) -> BatchResult:
+    text = _strip_code_fences(raw_text)
+    data = json.loads(text)
+
+    new_situations: list[NewSituation] = []
+    for idx, ns in enumerate(data.get("new_situations", []), start=1):
+        title = str(ns.get("title") or "").strip()
+        if not title:
+            continue
+        new_situations.append(
+            NewSituation(
+                temp_id=str(ns.get("temp_id") or f"new_{idx}"),
+                title=title,
+                description=str(ns.get("description") or "").strip(),
+                query=str(ns.get("query") or title).strip(),
+                supporting_article_ids=[
+                    str(article_id).strip()
+                    for article_id in ns.get("supporting_article_ids", [])
+                    if str(article_id).strip()
+                ],
+            )
+        )
+
+    results: list[ArticleResult] = []
     for item in data.get("results", []):
+        article_id = str(item.get("article_id") or "").strip()
+        if not article_id:
+            continue
         matches = [
             CategorizationMatch(
-                situation_id=m["situation_id"],
+                situation_id=str(m["situation_id"]),
                 relevance_score=float(m["relevance_score"]),
-                reason=m["reason"],
+                reason=str(m.get("reason") or ""),
             )
             for m in item.get("matches", [])
+            if "situation_id" in m and "relevance_score" in m
         ]
-        results.append(ArticleResult(article_id=item["article_id"], matches=matches))
+        results.append(ArticleResult(article_id=article_id, matches=matches))
     return BatchResult(results=results, new_situations=new_situations)
 
 
@@ -168,12 +254,21 @@ class LLMProvider(ABC):
     """Base class for LLM providers."""
 
     @abstractmethod
+    async def discover_situations(
+        self,
+        article_titles: list[dict],
+        existing_situations: list[dict],
+    ) -> list[NewSituation]:
+        """Discover new broad situations from compact article titles."""
+        ...
+
+    @abstractmethod
     async def categorize_batch(
         self,
         articles: list[dict],
         situations: list[dict],
     ) -> BatchResult:
-        """Categorize a batch of articles against all situations."""
+        """Match a batch of articles to existing situations."""
         ...
 
     @property
@@ -196,20 +291,35 @@ class AnthropicProvider(LLMProvider):
     def model_name(self) -> str:
         return self._model
 
-    async def categorize_batch(
+    async def discover_situations(
         self,
-        articles: list[dict],
-        situations: list[dict],
-    ) -> BatchResult:
-        prompt = _build_prompt(articles, situations)
+        article_titles: list[dict],
+        existing_situations: list[dict],
+    ) -> list[NewSituation]:
+        prompt = _build_discovery_prompt(article_titles, existing_situations)
         response = await self._client.messages.create(
             model=self._model,
             max_tokens=8192,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = response.content[0].text
-        log.debug("Anthropic response: %s", raw[:500])
-        return _parse_response(raw)
+        log.debug("Anthropic discovery response: %s", raw[:500])
+        return _parse_discovery_response(raw)
+
+    async def categorize_batch(
+        self,
+        articles: list[dict],
+        situations: list[dict],
+    ) -> BatchResult:
+        prompt = _build_categorization_prompt(articles, situations)
+        response = await self._client.messages.create(
+            model=self._model,
+            max_tokens=8192,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text
+        log.debug("Anthropic categorization response: %s", raw[:500])
+        return _parse_categorization_response(raw)
 
 
 class OpenAIProvider(LLMProvider):
@@ -225,12 +335,12 @@ class OpenAIProvider(LLMProvider):
     def model_name(self) -> str:
         return self._model
 
-    async def categorize_batch(
+    async def discover_situations(
         self,
-        articles: list[dict],
-        situations: list[dict],
-    ) -> BatchResult:
-        prompt = _build_prompt(articles, situations)
+        article_titles: list[dict],
+        existing_situations: list[dict],
+    ) -> list[NewSituation]:
+        prompt = _build_discovery_prompt(article_titles, existing_situations)
         response = await self._client.chat.completions.create(
             model=self._model,
             max_tokens=8192,
@@ -238,8 +348,24 @@ class OpenAIProvider(LLMProvider):
             response_format={"type": "json_object"},
         )
         raw = response.choices[0].message.content
-        log.debug("OpenAI response: %s", raw[:500])
-        return _parse_response(raw)
+        log.debug("OpenAI discovery response: %s", raw[:500])
+        return _parse_discovery_response(raw)
+
+    async def categorize_batch(
+        self,
+        articles: list[dict],
+        situations: list[dict],
+    ) -> BatchResult:
+        prompt = _build_categorization_prompt(articles, situations)
+        response = await self._client.chat.completions.create(
+            model=self._model,
+            max_tokens=8192,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        raw = response.choices[0].message.content
+        log.debug("OpenAI categorization response: %s", raw[:500])
+        return _parse_categorization_response(raw)
 
 
 def create_provider(provider_name: str, api_key: str, model: str = "") -> LLMProvider:

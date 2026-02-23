@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS feed_article (
 
 CREATE INDEX IF NOT EXISTS idx_feed_article_source_id ON feed_article(feed_source_id);
 CREATE INDEX IF NOT EXISTS idx_feed_article_published ON feed_article(published_date DESC);
+CREATE INDEX IF NOT EXISTS idx_feed_article_ingested_at ON feed_article(ingested_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_situation_user_id ON situation(user_id);
 CREATE INDEX IF NOT EXISTS idx_article_source_id ON article(source_id);
