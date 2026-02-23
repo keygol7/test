@@ -166,6 +166,7 @@ class SuggestionArticle(BaseModel):
 
 
 class SituationSuggestion(BaseModel):
+    source_situation_id: UUID
     topic: str
     query: str
     description: str
@@ -176,6 +177,7 @@ class SituationSuggestion(BaseModel):
 
 
 class CreateFromSuggestion(BaseModel):
+    source_situation_id: UUID | None = None
     topic: str
     query: str
     description: str

@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import desc, distinct, func, select, text
+from sqlalchemy import desc, distinct, func, insert, literal, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -251,7 +251,7 @@ def create_situation_from_suggestion(
     db: Session = Depends(get_db),
     current_user: AppUser = Depends(get_current_user),
 ) -> Situation:
-    """Create a situation and auto-ingest its discovered articles."""
+    """Create a situation and seed it from an existing suggested situation."""
     situation = Situation(
         user_id=current_user.id,
         title=payload.topic,
@@ -262,61 +262,88 @@ def create_situation_from_suggestion(
     db.add(situation)
     db.flush()
 
-    for art in payload.articles:
-        # Get or create the source
-        source = db.scalar(
-            select(Source).where(Source.name == art.source_name, Source.base_url == "")
+    copied_links = 0
+    if payload.source_situation_id is not None:
+        source_situation = db.scalar(
+            select(Situation).where(
+                Situation.id == payload.source_situation_id,
+                Situation.is_active.is_(True),
+            )
         )
-        if not source:
-            source = Source(name=art.source_name, base_url="", source_type="news_site")
-            db.add(source)
-            try:
-                db.flush()
-            except IntegrityError:
-                db.rollback()
-                source = db.scalar(
-                    select(Source).where(Source.name == art.source_name, Source.base_url == "")
+        if source_situation is not None:
+            copy_stmt = insert(SituationArticle).from_select(
+                [
+                    SituationArticle.situation_id,
+                    SituationArticle.article_id,
+                    SituationArticle.relevance_score,
+                    SituationArticle.reason,
+                    SituationArticle.llm_model,
+                ],
+                select(
+                    literal(situation.id),
+                    SituationArticle.article_id,
+                    SituationArticle.relevance_score,
+                    SituationArticle.reason,
+                    SituationArticle.llm_model,
+                ).where(SituationArticle.situation_id == source_situation.id),
+            )
+            copied = db.execute(copy_stmt)
+            copied_links = int(copied.rowcount or 0)
+
+    # Fallback for stale/unknown suggestions with no source links available.
+    if copied_links == 0:
+        for art in payload.articles:
+            source = db.scalar(
+                select(Source).where(Source.name == art.source_name, Source.base_url == "")
+            )
+            if not source:
+                source = Source(name=art.source_name, base_url="", source_type="news_site")
+                db.add(source)
+                try:
+                    db.flush()
+                except IntegrityError:
+                    db.rollback()
+                    source = db.scalar(
+                        select(Source).where(Source.name == art.source_name, Source.base_url == "")
+                    )
+                    if not source:
+                        continue
+
+            existing = db.scalar(select(Article).where(Article.url == art.url))
+            if existing:
+                article = existing
+            else:
+                article = Article(
+                    source_id=source.id,
+                    url=art.url,
+                    title=art.title,
+                    extra_metadata={},
                 )
-                if not source:
-                    continue
+                db.add(article)
+                try:
+                    db.flush()
+                except IntegrityError:
+                    db.rollback()
+                    article = db.scalar(select(Article).where(Article.url == art.url))
+                    if not article:
+                        continue
 
-        # Get or create the article
-        existing = db.scalar(select(Article).where(Article.url == art.url))
-        if existing:
-            article = existing
-        else:
-            article = Article(
-                source_id=source.id,
-                url=art.url,
-                title=art.title,
-                extra_metadata={},
+            existing_link = db.scalar(
+                select(SituationArticle).where(
+                    SituationArticle.situation_id == situation.id,
+                    SituationArticle.article_id == article.id,
+                )
             )
-            db.add(article)
-            try:
-                db.flush()
-            except IntegrityError:
-                db.rollback()
-                article = db.scalar(select(Article).where(Article.url == art.url))
-                if not article:
-                    continue
-
-        # Link article to situation
-        existing_link = db.scalar(
-            select(SituationArticle).where(
-                SituationArticle.situation_id == situation.id,
-                SituationArticle.article_id == article.id,
-            )
-        )
-        if not existing_link:
-            db.add(SituationArticle(
-                situation_id=situation.id,
-                article_id=article.id,
-                reason="Tracked from LLM-categorized suggestion",
-            ))
+            if not existing_link:
+                db.add(SituationArticle(
+                    situation_id=situation.id,
+                    article_id=article.id,
+                    reason="Tracked from LLM-categorized suggestion",
+                ))
 
     db.commit()
     db.refresh(situation)
-    enqueue_situation_backfill(db, str(situation.id), reset=False)
+    enqueue_situation_backfill(db, str(situation.id), reset=True)
     return situation
 
 
@@ -839,6 +866,7 @@ def get_news_suggestions(
         )
 
         results.append({
+            "source_situation_id": row.id,
             "topic": row.title,
             "query": row.query or row.title,
             "description": description,

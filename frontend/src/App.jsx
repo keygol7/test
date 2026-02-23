@@ -442,6 +442,7 @@ export default function App() {
       const created = await httpJson(`${baseUrl}/situations/from-suggestion`, {
         method: "POST",
         body: JSON.stringify({
+          source_situation_id: suggestion.source_situation_id || null,
           topic: topicName,
           query: suggestion.query,
           description: suggestion.description,
