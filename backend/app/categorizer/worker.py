@@ -50,13 +50,19 @@ def main():
     log.info("=== Categorization Worker starting ===")
     log.info(
         "Provider: %s | Interval: %d min | Batch size: %d | Threshold: %.2f | "
-        "Discovery limit: %d | Discovery window: %d hours",
+        "Uncategorized window: %d hours | Discovery limit: %d | Discovery window: %d hours | "
+        "Backfill: %s chunk=%d write_batch=%d max_situations=%d",
         settings.llm_provider,
         settings.categorizer_interval_minutes,
         settings.categorizer_batch_size,
         settings.categorizer_relevance_threshold,
+        settings.categorizer_uncategorized_since_hours,
         settings.categorizer_discovery_limit,
         settings.categorizer_discovery_since_hours,
+        settings.categorizer_backfill_enabled,
+        settings.categorizer_backfill_chunk_size,
+        settings.categorizer_backfill_write_batch_size,
+        settings.categorizer_backfill_max_situations_per_cycle,
     )
 
     # Verify database connectivity

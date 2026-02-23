@@ -73,6 +73,51 @@ class Situation(Base):
     snapshots: Mapped[list["DashboardSnapshot"]] = relationship(
         back_populates="situation", cascade="all, delete-orphan"
     )
+    backfill_state: Mapped["SituationBackfillState | None"] = relationship(
+        back_populates="situation",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class SituationBackfillState(Base):
+    __tablename__ = "situation_backfill_state"
+
+    situation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("situation.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    status: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="pending",
+        server_default=text("'pending'"),
+    )
+    cursor_ingested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cursor_feed_article_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    processed_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    linked_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    last_error: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    situation: Mapped["Situation"] = relationship(back_populates="backfill_state")
 
 
 class Source(Base):

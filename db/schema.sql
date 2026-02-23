@@ -25,6 +25,18 @@ CREATE TABLE IF NOT EXISTS situation (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS situation_backfill_state (
+    situation_id UUID PRIMARY KEY REFERENCES situation(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'done', 'failed')),
+    cursor_ingested_at TIMESTAMPTZ,
+    cursor_feed_article_id UUID,
+    processed_count INTEGER NOT NULL DEFAULT 0,
+    linked_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS source (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
@@ -96,6 +108,8 @@ CREATE TABLE IF NOT EXISTS feed_article (
 CREATE INDEX IF NOT EXISTS idx_feed_article_source_id ON feed_article(feed_source_id);
 CREATE INDEX IF NOT EXISTS idx_feed_article_published ON feed_article(published_date DESC);
 CREATE INDEX IF NOT EXISTS idx_feed_article_ingested_at ON feed_article(ingested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_situation_backfill_status_updated
+    ON situation_backfill_state(status, updated_at);
 
 CREATE INDEX IF NOT EXISTS idx_situation_user_id ON situation(user_id);
 CREATE INDEX IF NOT EXISTS idx_article_source_id ON article(source_id);

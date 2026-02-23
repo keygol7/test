@@ -47,8 +47,8 @@ TOOLS = [
                 },
                 "since_hours": {
                     "type": "integer",
-                    "description": "Only articles ingested within this many hours (default 24)",
-                    "default": 24,
+                    "description": "Only articles ingested within this many hours (0 means no cutoff)",
+                    "default": 0,
                 },
             },
         },
@@ -158,6 +158,88 @@ TOOLS = [
         },
     ),
     Tool(
+        name="enqueue_situation_backfill",
+        description=(
+            "Queue or reset keyword backfill processing for a situation. "
+            "Used internally after situation create/update."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "situation_id": {
+                    "type": "string",
+                    "description": "UUID of the situation",
+                },
+                "reset": {
+                    "type": "boolean",
+                    "description": "If true, reset cursor/counters before reprocessing",
+                    "default": False,
+                },
+            },
+            "required": ["situation_id"],
+        },
+    ),
+    Tool(
+        name="list_backfill_candidates",
+        description=(
+            "List pending/running backfill jobs ordered by oldest update first."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Max jobs to return (default 20)",
+                    "default": 20,
+                },
+            },
+        },
+    ),
+    Tool(
+        name="run_situation_backfill_chunk",
+        description=(
+            "Process one chunk of feed history for one situation using "
+            "deterministic keyword matching."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "situation_id": {
+                    "type": "string",
+                    "description": "UUID of the situation",
+                },
+                "chunk_size": {
+                    "type": "integer",
+                    "description": "Max feed rows to scan this run (default 500)",
+                    "default": 500,
+                },
+                "write_batch_size": {
+                    "type": "integer",
+                    "description": "Commit interval while processing rows (default 50)",
+                    "default": 50,
+                },
+            },
+            "required": ["situation_id"],
+        },
+    ),
+    Tool(
+        name="enqueue_all_active_situation_backfills",
+        description=(
+            "Queue (or reset) backfill state for all active situations. "
+            "Useful for one-time bootstrap after deployment."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "reset": {
+                    "type": "boolean",
+                    "description": "If true, reset existing cursors/counters",
+                    "default": False,
+                },
+            },
+        },
+    ),
+    Tool(
         name="create_situation",
         description=(
             "Create a new situation (topic) discovered by the LLM from article analysis. "
@@ -209,7 +291,7 @@ def _dispatch(db, name: str, arguments: dict) -> object:
         return db_tools.get_uncategorized_articles(
             db,
             limit=arguments.get("limit", 50),
-            since_hours=arguments.get("since_hours", 24),
+            since_hours=arguments.get("since_hours", 0),
         )
     elif name == "get_all_articles_titles":
         return db_tools.get_all_articles_titles(
@@ -233,6 +315,29 @@ def _dispatch(db, name: str, arguments: dict) -> object:
             db,
             feed_article_id=arguments["feed_article_id"],
             reason=arguments["reason"],
+        )
+    elif name == "enqueue_situation_backfill":
+        return db_tools.enqueue_situation_backfill(
+            db,
+            situation_id=arguments["situation_id"],
+            reset=arguments.get("reset", False),
+        )
+    elif name == "list_backfill_candidates":
+        return db_tools.list_backfill_candidates(
+            db,
+            limit=arguments.get("limit", 20),
+        )
+    elif name == "run_situation_backfill_chunk":
+        return db_tools.run_situation_backfill_chunk(
+            db,
+            situation_id=arguments["situation_id"],
+            chunk_size=arguments.get("chunk_size", 500),
+            write_batch_size=arguments.get("write_batch_size", 50),
+        )
+    elif name == "enqueue_all_active_situation_backfills":
+        return db_tools.enqueue_all_active_situation_backfills(
+            db,
+            reset=arguments.get("reset", False),
         )
     elif name == "create_situation":
         return db_tools.create_situation(

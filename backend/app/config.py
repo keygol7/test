@@ -26,8 +26,13 @@ class Settings(BaseSettings):
     categorizer_interval_minutes: int = 5
     categorizer_batch_size: int = 50
     categorizer_relevance_threshold: float = 0.3
+    categorizer_uncategorized_since_hours: int = 0
     categorizer_discovery_limit: int = 1000
     categorizer_discovery_since_hours: int = 336
+    categorizer_backfill_enabled: bool = True
+    categorizer_backfill_chunk_size: int = 500
+    categorizer_backfill_write_batch_size: int = 50
+    categorizer_backfill_max_situations_per_cycle: int = 20
 
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),

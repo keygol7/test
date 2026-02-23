@@ -16,6 +16,7 @@ from .auth import (
 )
 from .config import settings
 from .database import get_db
+from .mcp_server.db_tools import enqueue_situation_backfill
 from .models import AppUser, Article, DashboardSnapshot, FeedArticle, FeedSource, Situation, SituationArticle, Source
 from .worker import fetch_single_feed
 
@@ -240,6 +241,7 @@ def create_situation(
     db.add(situation)
     db.commit()
     db.refresh(situation)
+    enqueue_situation_backfill(db, str(situation.id), reset=False)
     return situation
 
 
@@ -314,6 +316,7 @@ def create_situation_from_suggestion(
 
     db.commit()
     db.refresh(situation)
+    enqueue_situation_backfill(db, str(situation.id), reset=False)
     return situation
 
 
@@ -353,12 +356,15 @@ def update_situation(
     situation = require_situation_access(db, situation_id, current_user)
 
     changes = payload.model_dump(exclude_unset=True)
+    reset_backfill = any(field in changes for field in ("title", "query"))
     for field, value in changes.items():
         setattr(situation, field, value)
     situation.updated_at = datetime.now(timezone.utc)
 
     db.commit()
     db.refresh(situation)
+    if reset_backfill:
+        enqueue_situation_backfill(db, str(situation.id), reset=True)
     return situation
 
 
