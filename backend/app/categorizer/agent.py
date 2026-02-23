@@ -5,7 +5,8 @@ Connects to the MCP server via stdio, reads uncategorized articles,
 sends batches to the LLM for categorization, and writes results back.
 
 The LLM both discovers new situations from articles AND categorizes
-articles into existing + new situations.
+articles into existing + new situations. New situations are only created
+if 3+ articles reference them (to avoid overly specific one-off topics).
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import json
 import logging
 import os
 import sys
+from collections import defaultdict
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -25,6 +27,9 @@ log = logging.getLogger("categorizer.agent")
 
 # Batch size for LLM calls (articles per prompt)
 LLM_BATCH_SIZE = 10
+
+# Minimum articles that must reference a new situation before we create it
+MIN_ARTICLES_FOR_NEW_SITUATION = 3
 
 
 def _get_server_params() -> StdioServerParameters:
@@ -62,8 +67,8 @@ async def run_categorization_cycle(
     Run one full categorization cycle:
     1. Fetch all active situations
     2. Fetch uncategorized articles
-    3. Batch-send to LLM (which discovers new situations + categorizes)
-    4. Create any new situations via MCP
+    3. Batch-send to LLM (collect all results)
+    4. Filter new situations: only create those with 3+ articles
     5. Write article-situation links back via MCP tools
     """
     stats = {
@@ -72,6 +77,7 @@ async def run_categorization_cycle(
         "errors": 0,
         "skipped": 0,
         "situations_created": 0,
+        "situations_filtered": 0,
     }
 
     # 1. Get existing situations
@@ -95,7 +101,13 @@ async def run_categorization_cycle(
     log.info("Found %d uncategorized articles to process", len(articles))
     threshold = settings.categorizer_relevance_threshold
 
-    # 3. Process in batches
+    # 3. Process all batches and collect results before creating anything
+    # We need to aggregate across batches to count articles per new situation
+    all_batch_results = []  # list of (batch_result, batch_index)
+    # Track proposed new situations and which articles reference them
+    # Key: temp_id -> {info: NewSituation, article_ids: set}
+    proposed_situations: dict[str, dict] = {}
+
     for i in range(0, len(articles), LLM_BATCH_SIZE):
         batch = articles[i : i + LLM_BATCH_SIZE]
         log.info(
@@ -112,45 +124,90 @@ async def run_categorization_cycle(
             stats["errors"] += len(batch)
             continue
 
-        # 4. Create any new situations the LLM discovered
-        temp_id_to_real_id: dict[str, str] = {}
+        all_batch_results.append(batch_result)
+
+        # Collect new situation proposals and count referencing articles
         for ns in batch_result.new_situations:
-            try:
-                result = await _call_tool(
-                    session,
-                    "create_situation",
-                    {
+            if ns.temp_id not in proposed_situations:
+                proposed_situations[ns.temp_id] = {
+                    "info": ns,
+                    "article_ids": set(),
+                }
+
+        for article_result in batch_result.results:
+            for m in article_result.matches:
+                if m.situation_id in proposed_situations and m.relevance_score >= threshold:
+                    proposed_situations[m.situation_id]["article_ids"].add(
+                        article_result.article_id
+                    )
+
+    # 4. Create only new situations that have 3+ articles referencing them
+    temp_id_to_real_id: dict[str, str] = {}
+    filtered_temp_ids: set[str] = set()
+
+    for temp_id, data in proposed_situations.items():
+        article_count = len(data["article_ids"])
+        ns = data["info"]
+
+        if article_count < MIN_ARTICLES_FOR_NEW_SITUATION:
+            log.info(
+                "Filtering out proposed situation '%s' — only %d articles (need %d+)",
+                ns.title,
+                article_count,
+                MIN_ARTICLES_FOR_NEW_SITUATION,
+            )
+            filtered_temp_ids.add(temp_id)
+            stats["situations_filtered"] += 1
+            continue
+
+        try:
+            result = await _call_tool(
+                session,
+                "create_situation",
+                {
+                    "title": ns.title,
+                    "description": ns.description,
+                    "query": ns.query,
+                },
+            )
+            if result and result.get("success"):
+                real_id = result["situation_id"]
+                temp_id_to_real_id[temp_id] = real_id
+                if not result.get("already_existed"):
+                    stats["situations_created"] += 1
+                    log.info(
+                        "Created new situation: %s (id=%s, %d articles)",
+                        ns.title,
+                        real_id,
+                        article_count,
+                    )
+                    situations.append({
+                        "id": real_id,
                         "title": ns.title,
                         "description": ns.description,
                         "query": ns.query,
-                    },
-                )
-                if result and result.get("success"):
-                    real_id = result["situation_id"]
-                    temp_id_to_real_id[ns.temp_id] = real_id
-                    if not result.get("already_existed"):
-                        stats["situations_created"] += 1
-                        log.info("Created new situation: %s (id=%s)", ns.title, real_id)
-                        # Add to situations list so subsequent batches can reference it
-                        situations.append({
-                            "id": real_id,
-                            "title": ns.title,
-                            "description": ns.description,
-                            "query": ns.query,
-                        })
-                    else:
-                        log.info("Reusing existing situation: %s (id=%s)", ns.title, real_id)
+                    })
                 else:
-                    log.warning("Failed to create situation %s: %s", ns.title, result)
-            except Exception:
-                log.exception("Failed to create situation: %s", ns.title)
+                    log.info(
+                        "Reusing existing situation: %s (id=%s)",
+                        ns.title,
+                        real_id,
+                    )
+            else:
+                log.warning("Failed to create situation %s: %s", ns.title, result)
+        except Exception:
+            log.exception("Failed to create situation: %s", ns.title)
 
-        # 5. Write article-situation links
+    # 5. Write article-situation links for all batches
+    for batch_result in all_batch_results:
         for article_result in batch_result.results:
             stats["articles_processed"] += 1
-            # Resolve temp IDs to real situation IDs and filter by threshold
+            # Resolve temp IDs and filter by threshold + filtered situations
             valid_matches = []
             for m in article_result.matches:
+                # Skip matches to situations that were filtered out (< 3 articles)
+                if m.situation_id in filtered_temp_ids:
+                    continue
                 sit_id = temp_id_to_real_id.get(m.situation_id, m.situation_id)
                 if m.relevance_score >= threshold:
                     valid_matches.append({
@@ -224,11 +281,12 @@ async def run_agent() -> dict:
             stats = await run_categorization_cycle(session, provider)
 
     log.info(
-        "Cycle complete: %d processed, %d links, %d skipped, %d errors, %d new situations",
+        "Cycle complete: %d processed, %d links, %d skipped, %d errors, %d new situations, %d filtered",
         stats.get("articles_processed", 0),
         stats.get("links_created", 0),
         stats.get("skipped", 0),
         stats.get("errors", 0),
         stats.get("situations_created", 0),
+        stats.get("situations_filtered", 0),
     )
     return stats

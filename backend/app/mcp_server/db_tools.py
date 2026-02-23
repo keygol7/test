@@ -221,6 +221,7 @@ def create_situation(
         description=description,
         query=query,
         is_active=True,
+        llm_created=True,
     )
     db.add(situation)
     db.commit()
